@@ -1,6 +1,6 @@
-// Futunn 港股/美股成交額 Widget
-// 版本: 2.1
-// 日期: 2025-10-20
+// Lbkrs 港股/美股成交額 Widget
+// 版本: 2.2-Lbkrs
+// 日期: 2025-10-30
 
 // ==================== 設定區 ====================
 const CONFIG = {
@@ -16,7 +16,6 @@ const CONFIG = {
     // 快取設定
     CACHE_DURATION: 1,          // 主列表快取時間(分鐘)
     OPTIONS_CACHE_DURATION: 1,  // Call/Put 比例快取時間(分鐘)
-    INDUSTRY_CACHE_DURATION: 1440, // 產業資訊快取時間(分鐘,24小時)
     KLINE_CACHE_DURATION: 1,    // K線數據快取時間(分鐘)
 
     // 效能設定
@@ -29,8 +28,8 @@ const CONFIG = {
 
     // 市場 URL 配置
     MARKET_URLS: {
-        US: 'https://www.futunn.com/hk/quote/us/stock-list/all-us-stocks/top-turnover',
-        HK: 'https://www.futunn.com/hk/quote/hk/stock-list/all-hk-stocks/top-turnover'
+        US: 'https://m-gl.lbkrs.com/api/forward/newmarket/revision/rank/pc/list?key=all&market=US&indicators[]=last_done&indicators[]=chg&indicators[]=change&indicators[]=total_amount&indicators[]=total_balance&indicators[]=turnover_rate&indicators[]=amplitude&indicators[]=volume_rate&indicators[]=depth_rate&indicators[]=pb_ttm&indicators[]=market_cap&indicators[]=five_min_chg&indicators[]=five_day_chg&indicators[]=ten_day_chg&indicators[]=twenty_day_chg&indicators[]=this_year_chg&indicators[]=half_year_chg&indicators[]=industry&sort_indicator=total_balance&order=desc&offset=0&limit=40',
+        HK: 'https://m-gl.lbkrs.com/api/forward/newmarket/revision/rank/pc/list?key=all&market=HK&indicators[]=last_done&indicators[]=chg&indicators[]=change&indicators[]=total_amount&indicators[]=total_balance&indicators[]=turnover_rate&indicators[]=amplitude&indicators[]=volume_rate&indicators[]=depth_rate&indicators[]=pb_ttm&indicators[]=market_cap&indicators[]=five_min_chg&indicators[]=five_day_chg&indicators[]=ten_day_chg&indicators[]=twenty_day_chg&indicators[]=this_year_chg&indicators[]=half_year_chg&indicators[]=industry&sort_indicator=total_balance&order=desc&offset=0&limit=40'
     },
 
     // K 線配置
@@ -258,6 +257,28 @@ class DataFetcher {
             throw new Error(`${context} JSON 解析失敗: ${e.message}`);
         }
     }
+
+    /**
+     * 獲取 Lbkrs JSON API 數據
+     * @param {string} url - Lbkrs API 網址
+     * @param {string} context - 上下文描述
+     * @returns {Promise<Object>} API 響應數據
+     */
+    async fetchLbkrsApi(url, context) {
+        try {
+            const html = await this.fetchWithRetry(url);
+            const data = JSON.parse(html);
+            
+            if (data.code !== 0) {
+                throw new Error(`Lbkrs API 錯誤: ${data.message || '未知錯誤'}`);
+            }
+            
+            return data;
+        } catch (e) {
+            saveDebugFile(`debug_${context}_error.txt`, `URL: ${url}\nError: ${e.message}`);
+            throw new Error(`${context} Lbkrs API 請求失敗: ${e.message}`);
+        }
+    }
 }
 
 // ==================== 核心類別:快取管理器 ====================
@@ -271,20 +292,18 @@ class CacheManager {
                 HK: this.fm.joinPath(this.fm.documentsDirectory(), 'futunn_stock_cache_hk.json')
             },
             options: this.fm.joinPath(this.fm.documentsDirectory(), 'futunn_options_cache.json'),
-            industry: this.fm.joinPath(this.fm.documentsDirectory(), 'futunn_industry_cache.json'),
             kline: this.fm.joinPath(this.fm.documentsDirectory(), 'futunn_kline_cache.json')
         };
         this.durations = {
             main: config.CACHE_DURATION,
             options: config.OPTIONS_CACHE_DURATION,
-            industry: config.INDUSTRY_CACHE_DURATION,
             kline: config.KLINE_CACHE_DURATION
         };
     }
 
     /**
      * 讀取快取資料
-     * @param {'main'|'options'|'industry'|'kline'} type - 快取類型
+     * @param {'main'|'options'|'kline'} type - 快取類型
      * @param {string} [keyOrMarket=null] - 項目索引鍵或市場代碼
      * @returns {any|null} 快取資料或 null
      */
@@ -298,7 +317,7 @@ class CacheManager {
             // 主列表但無市場代碼,返回 null
             return null;
         } else {
-            // options/industry/kline
+            // options/kline
             path = this.paths[type];
         }
         
@@ -313,7 +332,7 @@ class CacheManager {
                 if (age > this.durations[type]) return null;
                 return cache;
             } else {
-                // options/industry/kline:檢查特定 key
+                // options/kline:檢查特定 key
                 const data = cache[keyOrMarket];
                 if (!data) return null;
                 const age = (new Date() - new Date(data.timestamp)) / 60000;
@@ -328,7 +347,7 @@ class CacheManager {
 
     /**
      * 寫入快取資料
-     * @param {'main'|'options'|'industry'|'kline'} type - 快取類型
+     * @param {'main'|'options'|'kline'} type - 快取類型
      * @param {string|Object} keyOrDataOrMarket - 市場代碼/索引鍵/主快取資料
      * @param {any} [value=null] - 要快取的值
      */
@@ -342,7 +361,7 @@ class CacheManager {
                 path = this.paths[type][market];
                 this.fm.writeString(path, JSON.stringify(value));
             } else {
-                // options/industry/kline:keyOrDataOrMarket 是索引鍵,value 是資料
+                // options/kline:keyOrDataOrMarket 是索引鍵,value 是資料
                 path = this.paths[type];
                 let items = this.fm.fileExists(path) ? JSON.parse(this.fm.readString(path)) : {};
                 items[keyOrDataOrMarket] = { value: value, timestamp: new Date() };
@@ -548,6 +567,89 @@ function resolveMarketAuto() {
 }
 
 
+// ==================== 數據映射工具函數 ====================
+
+/**
+ * 從 Lbkrs counter_id 提取股票代碼
+ * @param {string} counterId - Lbkrs 股票 ID (例如: "ST/US/NVDA")
+ * @returns {string} 股票代碼
+ */
+function extractStockCode(counterId) {
+    const parts = counterId.split('/');
+    return parts[parts.length - 1]; // 提取最後一部分作為代碼
+}
+
+/**
+ * 根據 counter_id 推斷股票類型
+ * @param {string} counterId - Lbkrs 股票 ID
+ * @returns {number} 股票類型 (3=股票, 4=ETF)
+ */
+function inferInstrumentType(counterId) {
+    return counterId.startsWith('ETF/') ? 4 : 3;
+}
+
+/**
+ * 將 Lbkrs API 數據映射到現有系統格式
+ * @param {Object} lbkrsItem - Lbkrs API 響應項目
+ * @returns {Object} 映射後的股票數據
+ */
+function mapLbkrsToExisting(lbkrsItem) {
+    const indicators = lbkrsItem.indicators;
+    
+    if (!indicators || indicators.length < 18) {
+        throw new Error(`Lbkrs 數據不完整: 缺少必要的指標數組 (需要 >= 18, 實際: ${indicators.length})`);
+    }
+    
+    // 提取關鍵指標
+    const price = parseFloat(indicators[0]) || 0;              // last_done (最新價)
+    const changePct = parseFloat(indicators[1]) || 0;          // chg (漲跌幅，小數形式)
+    const changeAmt = parseFloat(indicators[2]) || 0;          // change (漲跌額)
+    const volume = indicators[3] || '0';                       // total_amount (成交量)
+    const turnover = indicators[4] || '0';                     // total_balance (成交額)
+    const volumnRatio = parseFloat(indicators[7]) || 0;        // volume_rate (量比)
+    const industry = indicators[17];                           // industry (行業) - 修正索引 [17]
+    
+    // 修正漲跌幅：將小數轉換為百分比
+    const formattedChangePct = changePct * 100; // 0.0284 -> 2.84
+    
+    // 格式化漲跌幅顯示
+    const changeRatio = `${formattedChangePct >= 0 ? '+' : ''}${formattedChangePct.toFixed(2)}%`;
+    
+    // 處理產業分類
+    let industryName;
+    const instrumentType = inferInstrumentType(lbkrsItem.counter_id);
+    
+    if (instrumentType === 4) {
+        // ETF 顯示 ETF 的名稱
+        industryName = lbkrsItem.name || 'ETF';
+    } else if (industry && typeof industry === 'string' && industry.trim() !== '') {
+        // 股票有產業數據
+        industryName = industry.trim();
+    } else {
+        // 股票無產業數據
+        industryName = '--';
+    }
+    
+    console.log(`[映射] ${lbkrsItem.name} (${lbkrsItem.code}):`);
+    console.log(`  原始漲跌幅: ${changePct} -> 格式化: ${formattedChangePct}%`);
+    console.log(`  產業 (索引[17]): "${industry}" -> "${industryName}"`);
+    console.log(`  半年漲幅 (索引[16]): "${indicators[16]}"`);
+    
+    return {
+        stockCode: extractStockCode(lbkrsItem.counter_id),
+        stockName: lbkrsItem.name || '--',
+        priceNominal: price,
+        changeRatio: changeRatio,
+        changeRatioNum: formattedChangePct, // 使用格式化後的百分比數值
+        tradeTrunover: turnover,
+        volumnRatio: volumnRatio,
+        instrumentType: inferInstrumentType(lbkrsItem.counter_id),
+        industry: industryName,
+        // 保留原始數據供調試
+        _rawData: lbkrsItem
+    };
+}
+
 // ==================== 主程式 ====================
 /**
  * 主函式
@@ -615,25 +717,22 @@ async function main() {
 // ==================== 資料抓取函式 ====================
 
 /**
- * 抓取成交額排行資料
+ * 抓取成交額排行資料 (Lbkrs API)
  * @param {DataFetcher} fetcher - 資料抓取器
  * @param {string} market - 市場代碼 ('US' 或 'HK')
  * @returns {Promise<Array>} 股票列表
  */
 async function fetchStockData(fetcher, market) {
     const url = CONFIG.MARKET_URLS[market];
-    const data = await fetcher.fetchAndParseInitialState(url, `turnover_${market}`);
+    const data = await fetcher.fetchLbkrsApi(url, `turnover_${market}`);
     
-    if (!data?.stock_list?.list) {
-        saveDebugFile(`debug_turnover_${market}_json.txt`, JSON.stringify(data, null, 2));
-        throw new Error(`${market} 成交額資料格式錯誤`);
+    if (!data?.data?.list || !Array.isArray(data.data.list)) {
+        saveDebugFile(`debug_${market}_lbkrs_data.txt`, JSON.stringify(data, null, 2));
+        throw new Error(`${market} Lbkrs API 數據格式錯誤`);
     }
     
-    // 解析時同時取得股票名稱
-    return data.stock_list.list.map(stock => ({
-        ...stock,
-        stockName: stock.name || '--'
-    }));
+    // 使用 Lbkrs 數據映射函數轉換為現有格式
+    return data.data.list.map(mapLbkrsToExisting);
 }
 
 /**
@@ -666,29 +765,8 @@ async function fetchSingleCallRatio(stock, fetcher, cache) {
 }
 
 /**
- * 根據股票代號和市場生成 TradingView URL
- * @param {string} stockCode - 股票代號
- * @param {string} market - 市場代碼 ('US' 或 'HK')
- * @returns {string} TradingView URL
- */
-function generateTradingViewUrl(stockCode, market) {
-    if (market === 'HK') {
-        // 港股:去前導零 + HKEX 前綴
-        const numericCode = parseInt(stockCode, 10);
-        return `https://tw.tradingview.com/symbols/HKEX-${numericCode}/`;
-    } else {
-        // 美股:直接使用代號
-        if (/^\d+$/.test(stockCode)) {
-            // 如果是純數字(少見),也加 HKEX 前綴
-            const numericCode = parseInt(stockCode, 10);
-            return `https://tw.tradingview.com/symbols/HKEX-${numericCode}/`;
-        }
-        return `https://tw.tradingview.com/symbols/${stockCode}/`;
-    }
-}
-
-/**
- * 抓取單一股票的產業資訊
+ * 產業分類現在直接從 Lbkrs API 獲取，不再需要網路請求
+ * 保留此函數作為兼容性接口，但現在只是返回 stock.industry
  * @param {Object} stock - 股票資料物件
  * @param {DataFetcher} fetcher - 資料抓取器
  * @param {CacheManager} cache - 快取管理器
@@ -696,35 +774,11 @@ function generateTradingViewUrl(stockCode, market) {
  * @returns {Promise<string>} 產業名稱或 '--'
  */
 async function fetchSingleIndustry(stock, fetcher, cache, market) {
+    // ETF 直接返回 'ETF'
     if (stock.instrumentType === 4) return 'ETF';
     
-    const cached = cache.get('industry', stock.stockCode);
-    if (cached !== null) return cached;
-
-    try {
-        const url = generateTradingViewUrl(stock.stockCode, market);
-        const html = await fetcher.fetchWithRetry(url);
-
-        const jsonLdMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
-        if (jsonLdMatch && jsonLdMatch[1]) {
-            const jsonData = JSON.parse(jsonLdMatch[1]);
-            if (jsonData["@type"] === "BreadcrumbList") {
-                const industryItem = jsonData.itemListElement.find(item =>
-                    item.item["@id"].includes("/sectorandindustry-industry/")
-                );
-                if (industryItem) {
-                    const industry = industryItem.item.name;
-                    cache.set('industry', stock.stockCode, industry);
-                    return industry;
-                }
-            }
-        }
-        saveDebugFile(`debug_industry_${stock.stockCode}.txt`, html);
-        return '--';
-    } catch (error) {
-        console.error(`處理 ${stock.stockCode} 產業資訊失敗: ${error.message}`);
-        return '--';
-    }
+    // 直接從 Lbkrs 數據獲取產業分類
+    return stock.industry || '--';
 }
 
 /**
@@ -780,7 +834,7 @@ async function fetchSingleKlineData(stock, fetcher, cache, market) {
 }
 
 /**
- * 並發為所有股票補充產業與期權資料
+ * 並發為所有股票補充產業與期權資料 (性能優化版)
  * @param {Array} data - 股票資料陣列
  * @param {DataFetcher} fetcher - 資料抓取器
  * @param {CacheManager} cache - 快取管理器
@@ -788,17 +842,29 @@ async function fetchSingleKlineData(stock, fetcher, cache, market) {
  * @returns {Promise<Array>} 補充後的股票資料陣列
  */
 async function enrichStockData(data, fetcher, cache, market) {
+    // 智能欄位檢測：只為顯示的欄位獲取數據
+    const visibleColumns = getActiveColumnSettings(market).filter(c => c.visible);
+    const needsIndustry = visibleColumns.some(col => col.key === 'industry');
+    const needsCallRatio = visibleColumns.some(col => col.key === 'callRatio');
+    const needsKline = visibleColumns.some(col => col.key === 'kline');
+    
+    console.log(`[優化] 市場: ${market}, 需要產業: ${needsIndustry}, 需要Call%: ${needsCallRatio}, 需要K線: ${needsKline}`);
+    
     const enrichedData = await Promise.all(data.map(async (stock) => {
-        const industry = await fetchSingleIndustry(stock, fetcher, cache, market);
+        // 產業分類：直接從 Lbkrs 獲取 (如果需要顯示)
+        const industry = needsIndustry ? stock.industry || '--' : '--';
         
-        // 僅美股抓取 Call%
+        // 僅美股抓取 Call% (如果需要顯示)
         let callRatio = '--';
-        if (market === 'US') {
+        if (needsCallRatio && market === 'US') {
             callRatio = await fetchSingleCallRatio(stock, fetcher, cache);
         }
         
-        // 新增: K 線數據補充
-        const klineData = await fetchSingleKlineData(stock, fetcher, cache, market);
+        // K 線數據補充 (如果需要顯示)
+        let klineData = null;
+        if (needsKline) {
+            klineData = await fetchSingleKlineData(stock, fetcher, cache, market);
+        }
         
         return { ...stock, industry, callRatio, klineData };
     }));
@@ -823,12 +889,13 @@ function filterData(stockList) {
             rank: index + 1,
             stockCode: stock.stockCode,
             stockName: stock.stockName || '--',
-            priceNominal: parseFloat(stock.priceNominal) || 0,
+            priceNominal: stock.priceNominal, // 已經是數字
             changeRatio: stock.changeRatio,
-            changeRatioNum: parseFloat(stock.changeRatio) || 0,
+            changeRatioNum: stock.changeRatioNum, // 已經是數字
             tradeTrunover: stock.tradeTrunover,
-            volumnRatio: parseFloat(stock.volumnRatio) || 0,
+            volumnRatio: stock.volumnRatio, // 已經是數字
             instrumentType: stock.instrumentType,
+            industry: stock.industry // 保留產業數據
         }));
 }
 
