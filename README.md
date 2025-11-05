@@ -14,30 +14,43 @@
 
 ## ✨ 功能特色
 
-- 🔄 **智慧市場切換** - 自動判斷並顯示開盤中的市場（港股/美股）
+- 🎯 **自選股票追蹤** - 支援自定義股票清單，智能雙模式切換
+- 🔄 **智能雙模式** - 自選模式優先，無自選時自動回退排行榜模式
+- 🌍 **自動市場識別** - 純數字→港股，包含字母→美股，完全自動化
 - 📈 **即時 K 線圖** - 顯示當日 OHLC 數據，綠漲紅跌配色
 - 🎨 **階梯式配色** - 漲跌幅 5 級漸變色彩，一眼辨識市場熱度
-- 📊 **期權比例** - 顯示美股 Call/Put 比例，洞察市場情緒
 - 🎯 **智能產業分類** - Lbkrs 數據源，ETF 顯示完整名稱，股票顯示實際行業
 - 💧 **量比分析** - 冷→熱漸變色彩顯示成交量變化
 - ⚡ **高效快取** - 優化快取策略，提升載入速度
 - 🌙 **深淺模式** - 自動適配 iOS 深淺色主題
+- 🔧 **多輪嘗試機制** - 智能修正流程，支援任意新ETF代碼
+- 🚀 **動態並發控制** - 根據股票數量自動調整並發數
 
 ## 📱 預覽
 
-### 美股模式
+### 自選股票模式（v2.3新增）
 ```
-更新時間    代號    K線  漲跌%    價格    成交額  量比  Call%
-────────────────────────────────────────────────────
-半導體     NVDA    📊  +3.58%  181.57  13.79B  1.88   52%
-科技       TSLA    📊  -2.15%  242.30   8.92B  2.34   48%
+更新時間    名稱/代號      K線  漲跌%    價格    成交額  量比
+───────────────────────────────────────────────────────
+半導體     NVDA          📊  +3.58%  181.57  13.79B  1.88
+金融服務   騰訊控股      📊  +2.15%  385.20  123.5億 1.25
+科技       TSLA          📊  -2.15%  242.30   8.92B  2.34
 ...
 ```
 
-### 港股模式
+### 美股排行榜模式
+```
+更新時間    代號    K線  漲跌%    價格    成交額  量比
+───────────────────────────────────────────────────
+半導體     NVDA    📊  +3.58%  181.57  13.79B  1.88
+科技       TSLA    📊  -2.15%  242.30   8.92B  2.34
+...
+```
+
+### 港股排行榜模式
 ```
 更新時間    名稱        K線  漲跌%    價格    成交額  量比
-────────────────────────────────────────────────
+───────────────────────────────────────────────
 金融服務   騰訊控股    📊  +2.15%  385.20  123.5億 1.25
 電訊       中國移動    📊  -0.82%   68.50   45.2億 0.89
 ...
@@ -75,6 +88,36 @@ git clone https://github.com/hin88188/ios-scriptable-stock-widget.git
 
 ## 📖 使用說明
 
+### 智能雙模式（v2.3新增）
+
+#### 自選股票模式
+```javascript
+// 在 CONFIG 中設定自選股票清單
+CUSTOM_WATCHLIST: [
+    'AAPL',    // 美股代號
+    '00700',   // 港股代號
+    'NVDA',    // 美股代號
+    'SPY'      // 美股ETF
+]
+```
+
+**特點**：
+- 自動識別市場：純數字→港股，包含字母→美股
+- 混合市場顯示：美股顯示代號，港股顯示中文名稱
+- 按用戶配置順序顯示
+- 支援任意新ETF代碼
+
+#### 排行榜模式
+```javascript
+// 不設定 CUSTOM_WATCHLIST 或設為空陣列
+CUSTOM_WATCHLIST: []
+```
+
+**特點**：
+- 自動市場切換：根據開盤時間智慧判斷
+- 按成交額排序顯示
+- 支援美股/港股排行榜
+
 ### 市場模式
 ```javascript
 MARKET: 'AUTO'  // 自動切換（推薦）
@@ -97,20 +140,27 @@ const CONFIG = {
     // 市場選擇
     MARKET: 'AUTO',           // 'AUTO' | 'US' | 'HK'
     
+    // 自選股票配置（v2.3新增功能）
+    CUSTOM_WATCHLIST: [
+        'AAPL',    // 美股代號
+        '00700',   // 港股代號
+        'NVDA',    // 美股代號
+        'SPY'      // 美股ETF
+    ],
+    
     // 顯示控制
     SHOW_STOCK: true,         // 顯示股票
     SHOW_ETF: true,           // 顯示 ETF
-    MAX_ITEMS: 20,            // 最多顯示筆數（建議 ≤ 20）
+    MAX_ITEMS: 21,            // 最多顯示筆數（建議 ≤ 21）
     FONT_SIZE: 12,            // 字體大小
     
     // 快取時效（分鐘）
-    CACHE_DURATION: 1,        // 主列表
-    OPTIONS_CACHE_DURATION: 1,    // Call/Put 比例
-    KLINE_CACHE_DURATION: 1,      // K 線數據
+    CACHE_DURATION: 1,        // 主列表和自選股票
+    KLINE_CACHE_DURATION: 1,  // K 線數據
     // 產業分類: 從 Lbkrs API 直接獲取（無需快取）
     
     // 效能設定
-    MAX_CONCURRENT_REQUESTS: 10,  // 最大並發請求數
+    MAX_CONCURRENT_REQUESTS: 10,  // 基準並發數
     REQUEST_RETRY_COUNT: 3,       // 請求重試次數
     REQUEST_TIMEOUT: 10000,       // 請求超時（毫秒）
     
@@ -143,15 +193,6 @@ GAIN_LEVELS: {
     level1: '#9BE39E'   // +0% ~ +0.5%
 }
 
-// Call% 色彩
-CALL_RATIO_COLORS: {
-    extremeBearish: '#D32F2F',  // < 35%: 過度悲觀
-    bearish: '#F44336',         // 35-45%: 偏空
-    neutral: '#757575',         // 45-55%: 中性
-    bullish: '#4CAF50',         // 55-65%: 偏多
-    extremeBullish: '#00ACC1'   // > 65%: 過度樂觀
-}
-
 // 量比色彩（冷→熱）
 VOLUMN_RATIO_COLORS: {
     coldest: '#4B6B8A',  // < 0.5
@@ -160,6 +201,52 @@ VOLUMN_RATIO_COLORS: {
     hot: '#FFD54F',      // 2.5-5.0
     hottest: '#FF5252'   // > 5.0
 }
+```
+
+### 欄位配置（v2.3更新）
+
+#### 美股欄位設定
+```javascript
+COLUMN_SETTINGS_US: [
+    { key: 'industry', header: '', width: 70, visible: true },
+    { key: 'rank', header: '', width: 25, visible: false },
+    { key: 'stockCode', header: '代號', width: 50, visible: true },
+    { key: 'kline', header: '', width: 8, visible: true },
+    { key: 'changeRatio', header: '漲跌%', width: 55, visible: true },
+    { key: 'priceNominal', header: '價格', width: 50, visible: true },
+    { key: 'tradeTrunover', header: '成交額', width: 45, visible: true },
+    { key: 'volumnRatio', header: '量比', width: 30, visible: true }
+    // v2.3移除: callRatio 欄位
+]
+```
+
+#### 港股欄位設定
+```javascript
+COLUMN_SETTINGS_HK: [
+    { key: 'industry', header: '', width: 70, visible: true },
+    { key: 'rank', header: '', width: 25, visible: false },
+    { key: 'stockName', header: '名稱', width: 85, visible: true },
+    { key: 'kline', header: '', width: 8, visible: true },
+    { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
+    { key: 'priceNominal', header: '價格', width: 50, visible: true },
+    { key: 'tradeTrunover', header: '成交額', width: 45, visible: true },
+    { key: 'volumnRatio', header: '量比', width: 30, visible: true }
+    // v2.3移除: callRatio 欄位
+]
+```
+
+#### 混合市場自選股票欄位設定（v2.3新增）
+```javascript
+COLUMN_SETTINGS_MIXED: [
+    { key: 'industry', header: '', width: 70, visible: true },
+    { key: 'rank', header: '', width: 25, visible: false },
+    { key: 'stockDisplay', header: '名稱/代號', width: 85, visible: true },
+    { key: 'kline', header: '', width: 8, visible: true },
+    { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
+    { key: 'priceNominal', header: '價格', width: 50, visible: true },
+    { key: 'tradeTrunover', header: '成交額', width: 45, visible: true },
+    { key: 'volumnRatio', header: '量比', width: 30, visible: true }
+]
 ```
 
 ## 🔧 常見問題
@@ -178,6 +265,20 @@ VOLUMN_RATIO_COLORS: {
 - 需要設定 Cookie（在配置中填入）
 - 檢查除錯檔案：Scriptable → 檔案 → `debug_*.txt`
 
+### Q: 自選股票不顯示？（v2.3新增）
+**A**: 檢查項目：
+- 確認 `CUSTOM_WATCHLIST` 配置正確
+- 檢查股票代碼格式（美股字母，港股數字）
+- 查看 Console 的自選股票錯誤訊息
+- 檢查除錯檔案 `debug_watchlist_${stockCode}_*.txt`
+
+### Q: 模式切換錯誤？（v2.3新增）
+**A**: 檢查項目：
+- 確認 `CUSTOM_WATCHLIST` 是否為空陣列
+- 檢查 `resolveDisplayMode()` 函式邏輯
+- 驗證 `CONFIG.MARKET` 設定
+- 查看 Console 的模式決策日誌
+
 ### Q: K 線圖不顯示？
 **A**: 檢查項目：
 - 確認網路連線正常
@@ -189,44 +290,67 @@ VOLUMN_RATIO_COLORS: {
 **A**: 
 1. 打開 Scriptable App
 2. 點擊 "檔案" 圖示
-3. 刪除 `futunn_*_cache*.json` 檔案
+3. 刪除 `lbkrs_*_cache*.json` 檔案
 
 ### Q: 如何調整顯示數量？
-**A**: 修改 `MAX_ITEMS` 參數（建議 ≤ 20，Large Widget 高度限制）
+**A**: 修改 `MAX_ITEMS` 參數（建議 ≤ 21，Large Widget 高度限制）
+
+### Q: 多輪嘗試機制失效？（v2.3新增）
+**A**: 檢查項目：
+- 確認 `fetchWithRetry()` 函式邏輯
+- 檢查 Counter ID 格式是否正確
+- 驗證股票類型識別邏輯
+- 查看所有嘗試的錯誤訊息
 
 ## 📊 資料來源
 
 - **主要數據源**: [Lbkrs API](https://m-gl.lbkrs.com/) (成交額排行、價格、漲跌幅、產業分類)
-- **輔助數據源**: Futunn (K 線數據、期權比例，僅美股)
+- **統一數據源**: Lbkrs Detail API (v2.3完全統一，移除Futunn依賴)
 - **產業分類**: Lbkrs 內建產業字段
 
 ## 🛠 技術架構
 
 ### 核心類別
-- **RequestQueue**: 並發請求管理
-- **DataFetcher**: HTTP 請求與解析
-- **CacheManager**: 分層快取系統
+- **RequestQueue**: 並發請求管理（v2.3增強動態並發）
+- **DataFetcher**: HTTP 請求與解析（v2.3新增Detail API）
+- **CacheManager**: 分層快取系統（v2.3新增自選快取）
 - **ColorCalculator**: 色彩計算與快取
 
-### 快取策略
+### 快取策略（v2.3更新）
 - **主列表**: 1 分鐘（即時更新）
-- **期權資料**: 1 分鐘
+- **自選股票**: 1 分鐘（v2.3新增）
 - **K 線數據**: 1 分鐘
 - **產業分類**: 從 Lbkrs API 直接獲取（無需快取）
 
-### 新架構優化 (v2.2)
-- **數據源整合**: 主要使用 Lbkrs API，輔助使用 Futunn
-- **智能欄位檢測**: 只為顯示的欄位獲取數據
-- **簡化快取**: 從 4 個快取文件減少到 3 個
-- **性能提升**: 載入速度提升 20-30%
+### 新架構優化 (v2.3)
+- **統一數據源**: 完全移除 Futunn API 依賴，統一使用 Lbkrs Detail API
+- **智能雙模式**: 自選模式優先，無自選時自動回退排行榜模式
+- **自動市場識別**: 純數字→港股，包含字母→美股
+- **多輪嘗試機制**: 智能修正流程，支援任意新ETF代碼
+- **動態並發控制**: 根據股票數量動態調整並發數
+- **混合市場顯示**: 美股顯示代號，港股顯示中文名稱
+- **移除期權功能**: 移除 Call% 欄位，簡化界面
 
 ### 效能優化
-- 並發請求佇列（預設 10 個並發）
+- 並發請求佇列（動態調整 5-30 個並發）
 - 請求重試機制（指數退避）
 - 色彩計算快取
 - 市場特定快取（美股/港股獨立）
+- 執行時間監控（v2.3新增）
 
 ## 📝 版本歷史
+
+### v2.3-Watchlist (2025-11-04)
+- 🎯 **自選股票功能**: 支援自定義股票清單，智能雙模式自動切換
+- 🌍 **自動市場識別**: 純數字→港股，包含字母→美股，完全智能化
+- 🔄 **智能雙模式**: 自選模式優先，無自選時自動回退排行榜模式
+- ⚡ **統一數據源**: 完全移除 Futunn API 依賴，統一使用 Lbkrs Detail API
+- 🔧 **多輪嘗試機制**: 智能修正流程：股票→ETF→股票，支援任意新ETF代碼
+- 🚀 **動態並發控制**: 根據股票數量動態調整並發數：`Math.min(股票數 + 5, 30)`
+- 📊 **執行時間監控**: 詳細日誌記錄，顯示各階段耗時統計
+- 🗑️ **移除期權功能**: 移除 Call% 欄位，簡化界面，專注於股票數據
+- 💾 **多層快取架構**: 排行榜快取 + 自選快取 + K線快取，支援市場特定快取
+- 🎨 **混合市場顯示**: 美股顯示代號，港股顯示中文名稱，智能欄位寬度調整
 
 ### v2.2-Lbkrs (2025-10-30)
 - ✨ **數據源切換**: 從 Futunn 切換到 Lbkrs API，提升數據穩定性和準確性
@@ -253,6 +377,54 @@ VOLUMN_RATIO_COLORS: {
 
 ### v1.0 (2025-10-16)
 - 🎉 初始版本發布
+
+## 🔄 升級指南
+
+### 從 v2.2 升級到 v2.3
+1. **移除期權配置**: 刪除 `callRatio` 相關配置
+2. **新增自選功能**: 可選擇性添加 `CUSTOM_WATCHLIST` 配置
+3. **更新欄位配置**: 移除 `COLUMN_SETTINGS_*` 中的 `callRatio` 欄位
+4. **測試功能**: 確認自選模式和排行榜模式都正常運作
+
+### 從 v2.1 升級到 v2.3
+1. **移除期權功能**: 刪除所有 Call% 相關配置
+2. **更新數據源**: 確認 Lbkrs API 正常運作
+3. **新增自選功能**: 可選擇性添加 `CUSTOM_WATCHLIST` 配置
+4. **測試性能**: 確認載入速度和穩定性
+
+## 📈 性能基準（v2.3）
+
+### 載入時間目標
+- **自選模式**: < 8 秒（5支股票）
+- **排行榜模式**: < 5 秒
+- **快取命中**: < 1 秒
+
+### API 成功率目標
+- **Lbkrs 排行榜 API**: > 98%
+- **Lbkrs Detail API**: > 95%
+- **多輪嘗試成功率**: > 99%
+
+### 資源使用
+- **並發請求數**: 5-30（動態調整）
+- **記憶體使用**: < 50MB
+- **快取檔案大小**: < 1MB
+
+## 🤝 貢獻指南
+
+歡迎提交 Issue 和 Pull Request！
+
+### 開發環境
+1. Fork 專案
+2. 創建功能分支
+3. 提交變更
+4. 推送到分支
+5. 創建 Pull Request
+
+### 代碼規範
+- 使用 JavaScript (ES6+)
+- 遵循現有代碼風格
+- 添加適當的註釋
+- 確保向下相容性
 
 ## ⭐ Star History
 

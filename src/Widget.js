@@ -1,21 +1,23 @@
 // Lbkrs 港股/美股成交額 Widget
-// 版本: 2.2-Lbkrs
-// 日期: 2025-10-30
+// 版本: 2.3-Watchlist
+// 日期: 2025-11-04
 
 // ==================== 設定區 ====================
 const CONFIG = {
     // 市場選擇
     MARKET: 'AUTO', // 'AUTO' 智慧切換 / 'US' 美股 / 'HK' 港股
 
+    // 自選股票配置，將下方註解打開即可使用
+    // CUSTOM_WATCHLIST: ['NVDA', 'SPY', '0700', '9988', '2800'],
+
     // 顯示設定
     SHOW_STOCK: true,           // 顯示股票
     SHOW_ETF: true,             // 顯示 ETF
-    MAX_ITEMS: 20,              // 最多顯示筆數
+    MAX_ITEMS: 21,              // 最多顯示筆數
     FONT_SIZE: 12,              // 字體大小
 
     // 快取設定
     CACHE_DURATION: 1,          // 主列表快取時間(分鐘)
-    OPTIONS_CACHE_DURATION: 1,  // Call/Put 比例快取時間(分鐘)
     KLINE_CACHE_DURATION: 1,    // K線數據快取時間(分鐘)
 
     // 效能設定
@@ -45,7 +47,7 @@ const CONFIG = {
 
     // 美股欄位設定
     COLUMN_SETTINGS_US: [
-        { key: 'industry', header: '', width: 60, visible: true },
+        { key: 'industry', header: '', width: 70, visible: true },
         { key: 'rank', header: '', width: 25, visible: false },
         { key: 'stockCode', header: '代號', width: 50, visible: true },
         { key: 'kline', header: '', width: 8, visible: true },
@@ -53,7 +55,6 @@ const CONFIG = {
         { key: 'priceNominal', header: '價格', width: 50, visible: true },
         { key: 'tradeTrunover', header: '成交額', width: 45, visible: true },
         { key: 'volumnRatio', header: '量比', width: 30, visible: true },
-        { key: 'callRatio', header: 'Call%', width: 40, visible: true },
     ],
 
     // 港股欄位設定
@@ -61,6 +62,18 @@ const CONFIG = {
         { key: 'industry', header: '', width: 70, visible: true },
         { key: 'rank', header: '', width: 25, visible: false },
         { key: 'stockName', header: '名稱', width: 85, visible: true },
+        { key: 'kline', header: '', width: 8, visible: true },
+        { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
+        { key: 'priceNominal', header: '價格', width: 50, visible: true },
+        { key: 'tradeTrunover', header: '成交額', width: 45, visible: true },
+        { key: 'volumnRatio', header: '量比', width: 30, visible: true },
+    ],
+
+    // 混合市場自選股票欄位設定（v2.3新增）
+    COLUMN_SETTINGS_MIXED: [
+        { key: 'industry', header: '', width: 70, visible: true },
+        { key: 'rank', header: '', width: 25, visible: false },
+        { key: 'stockDisplay', header: '名稱/代號', width: 85, visible: true },
         { key: 'kline', header: '', width: 8, visible: true },
         { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
         { key: 'priceNominal', header: '價格', width: 50, visible: true },
@@ -93,24 +106,6 @@ const CONFIG = {
         headerBackground: Color.dynamic(new Color('#F0F0F0'), new Color('#333333')),
     },
 
-    // Call% 色塊專屬配色
-    CALL_RATIO_COLORS: {
-        extremeBearish: '#D32F2F',  // < 35%:過度悲觀(鮮紅)
-        bearish: '#F44336',         // 35-45%:偏空(淺紅)
-        neutral: '#757575',         // 45-55%:中性(灰色)
-        bullish: '#4CAF50',         // 55-65%:偏多(綠色)
-        extremeBullish: '#00ACC1'   // > 65%:過度樂觀(青藍)
-    },
-    
-    // Call% 顏色計算閾值
-    CALL_RATIO_THRESHOLDS: {
-        EXTREME_BEARISH: 35,
-        BEARISH: 45,
-        NEUTRAL_LOW: 45,
-        NEUTRAL_HIGH: 55,
-        BULLISH: 65
-    },
-
     // 量比顏色系統(冷→熱漸變)
     VOLUMN_RATIO_COLORS: {
         coldest: '#4B6B8A',    // < 0.5:深藍灰
@@ -134,18 +129,27 @@ const CONFIG = {
         HEADER_PADDING: { top: 4, left: 12, bottom: 4, right: 12 },
         ROW_PADDING: { top: 0, left: 12, bottom: 0, right: 12 },
         PROGRESS_BAR_HEIGHT: 1,
-        CALL_LABEL_PADDING: { top: 0.5, left: 5, bottom: 0.5, right: 5 },
-        CALL_LABEL_CORNER_RADIUS: 4,
-        CALL_LABEL_TEXT_COLOR: '#FFFFFF',
     }
 };
 
 // ==================== 核心類別:請求佇列管理 ====================
 class RequestQueue {
-    constructor(maxConcurrent = 10) {
-        this.maxConcurrent = maxConcurrent;
+    constructor(getConcurrencyFn) {
+        this.maxConcurrent = 10;
+        this.getConcurrencyFn = getConcurrencyFn || (() => 10);
         this.running = 0;
         this.queue = [];
+    }
+
+    /**
+     * 計算動態並發數
+     * @returns {number} 並發數
+     */
+    getConcurrency() {
+        if (typeof this.getConcurrencyFn === 'function') {
+            return Math.min(this.getConcurrencyFn(), 30);
+        }
+        return Math.min(this.maxConcurrent, 30);
     }
 
     /**
@@ -164,7 +168,8 @@ class RequestQueue {
      * 處理佇列
      */
     async process() {
-        if (this.running >= this.maxConcurrent || this.queue.length === 0) return;
+        const currentMax = this.getConcurrency();
+        if (this.running >= currentMax || this.queue.length === 0) return;
 
         this.running++;
         const { requestFn, resolve, reject } = this.queue.shift();
@@ -185,7 +190,10 @@ class RequestQueue {
 class DataFetcher {
     constructor(config) {
         this.config = config;
-        this.queue = new RequestQueue(config.MAX_CONCURRENT_REQUESTS);
+        this.queue = new RequestQueue((stockCount) => {
+            // 動態計算並發數：Math.min(股票數 + 5, 30)
+            return Math.min((stockCount || 0) + 5, 30);
+        });
     }
 
     /**
@@ -227,34 +235,17 @@ class DataFetcher {
     }
 
     /**
-     * 延遲函式
+     * 延遲函式 - Scriptable完全兼容版本
      * @param {number} ms - 延遲毫秒數
      * @returns {Promise}
      */
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    /**
-     * 解析 Futunn 網頁的 __INITIAL_STATE__
-     * @param {string} url - 目標網址
-     * @param {string} context - 上下文描述
-     * @returns {Promise<Object>} 解析後的 JSON
-     */
-    async fetchAndParseInitialState(url, context) {
-        const html = await this.fetchWithRetry(url);
-        const match = html.match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});/);
-        
-        if (!match || !match[1]) {
-            saveDebugFile(`debug_${context}_html.txt`, html);
-            throw new Error(`在 ${context} 頁面找不到資料區塊`);
-        }
-        
-        try {
-            return JSON.parse(match[1]);
-        } catch (e) {
-            saveDebugFile(`debug_${context}_json_error.txt`, match[1]);
-            throw new Error(`${context} JSON 解析失敗: ${e.message}`);
+    async delay(ms) {
+        if (ms <= 0) return;
+        // 完全避免setTimeout，使用簡單的同步等待
+        const start = Date.now();
+        while (Date.now() - start < ms) {
+            // 空循環等待，避免任何可能的setTimeout調用
+            // 在Scriptable中這是最可靠的方式
         }
     }
 
@@ -279,6 +270,29 @@ class DataFetcher {
             throw new Error(`${context} Lbkrs API 請求失敗: ${e.message}`);
         }
     }
+
+    /**
+     * 獲取 Lbkrs Detail API 數據
+     * @param {string} counterId - Lbkrs Counter ID (格式: {TYPE}/{MARKET}/{SYMBOL})
+     * @param {string} context - 上下文描述
+     * @returns {Promise<Object>} 詳細數據
+     */
+    async fetchLbkrsDetailData(counterId, context) {
+        const url = `https://m-gl.lbkrs.com/api/forward/v3/quote/stock/detail?counter_id=${counterId}`;
+        try {
+            const html = await this.fetchWithRetry(url);
+            const data = JSON.parse(html);
+            
+            if (data.code !== 0) {
+                throw new Error(`Lbkrs Detail API 錯誤: ${data.message || '未知錯誤'}`);
+            }
+            
+            return data;
+        } catch (e) {
+            saveDebugFile(`debug_${context}_detail_error.txt`, `URL: ${url}\nError: ${e.message}`);
+            throw new Error(`${context} Lbkrs Detail API 請求失敗: ${e.message}`);
+        }
+    }
 }
 
 // ==================== 核心類別:快取管理器 ====================
@@ -288,22 +302,22 @@ class CacheManager {
         this.fm = FileManager.local();
         this.paths = {
             main: {
-                US: this.fm.joinPath(this.fm.documentsDirectory(), 'futunn_stock_cache_us.json'),
-                HK: this.fm.joinPath(this.fm.documentsDirectory(), 'futunn_stock_cache_hk.json')
+                US: this.fm.joinPath(this.fm.documentsDirectory(), 'lbkrs_ranking_cache_us.json'),
+                HK: this.fm.joinPath(this.fm.documentsDirectory(), 'lbkrs_ranking_cache_hk.json')
             },
-            options: this.fm.joinPath(this.fm.documentsDirectory(), 'futunn_options_cache.json'),
-            kline: this.fm.joinPath(this.fm.documentsDirectory(), 'futunn_kline_cache.json')
+            watchlist: this.fm.joinPath(this.fm.documentsDirectory(), 'lbkrs_watchlist_cache.json'),
+            kline: this.fm.joinPath(this.fm.documentsDirectory(), 'lbkrs_kline_cache.json')
         };
         this.durations = {
             main: config.CACHE_DURATION,
-            options: config.OPTIONS_CACHE_DURATION,
+            watchlist: config.CACHE_DURATION,
             kline: config.KLINE_CACHE_DURATION
         };
     }
 
     /**
      * 讀取快取資料
-     * @param {'main'|'options'|'kline'} type - 快取類型
+     * @param {'main'|'watchlist'|'kline'} type - 快取類型
      * @param {string} [keyOrMarket=null] - 項目索引鍵或市場代碼
      * @returns {any|null} 快取資料或 null
      */
@@ -317,7 +331,7 @@ class CacheManager {
             // 主列表但無市場代碼,返回 null
             return null;
         } else {
-            // options/kline
+            // watchlist/kline
             path = this.paths[type];
         }
         
@@ -332,7 +346,7 @@ class CacheManager {
                 if (age > this.durations[type]) return null;
                 return cache;
             } else {
-                // options/kline:檢查特定 key
+                // watchlist/kline:檢查特定 key
                 const data = cache[keyOrMarket];
                 if (!data) return null;
                 const age = (new Date() - new Date(data.timestamp)) / 60000;
@@ -347,7 +361,7 @@ class CacheManager {
 
     /**
      * 寫入快取資料
-     * @param {'main'|'options'|'kline'} type - 快取類型
+     * @param {'main'|'watchlist'|'kline'} type - 快取類型
      * @param {string|Object} keyOrDataOrMarket - 市場代碼/索引鍵/主快取資料
      * @param {any} [value=null] - 要快取的值
      */
@@ -361,7 +375,7 @@ class CacheManager {
                 path = this.paths[type][market];
                 this.fm.writeString(path, JSON.stringify(value));
             } else {
-                // options/kline:keyOrDataOrMarket 是索引鍵,value 是資料
+                // watchlist/kline:keyOrDataOrMarket 是索引鍵,value 是資料
                 path = this.paths[type];
                 let items = this.fm.fileExists(path) ? JSON.parse(this.fm.readString(path)) : {};
                 items[keyOrDataOrMarket] = { value: value, timestamp: new Date() };
@@ -417,35 +431,6 @@ class ColorCalculator {
         return new Color(NEUTRAL);
     }
 
-    /**
-     * 取得 Call% 顏色(帶快取)
-     * @param {number} ratio - Call 百分比
-     * @returns {Color} 顏色物件
-     */
-    getCallRatioColor(ratio) {
-        const key = `call_${ratio}`;
-        if (this.cache.has(key)) return this.cache.get(key);
-        
-        const color = this.calculateCallRatioColor(ratio);
-        this.cache.set(key, color);
-        return color;
-    }
-
-    /**
-     * 計算 Call% 色塊顏色
-     * @param {number} ratio - Call 百分比
-     * @returns {Color} 顏色物件
-     */
-    calculateCallRatioColor(ratio) {
-        const t = this.config.CALL_RATIO_THRESHOLDS;
-        const c = this.config.CALL_RATIO_COLORS;
-        
-        if (ratio < t.EXTREME_BEARISH) return new Color(c.extremeBearish);
-        if (ratio < t.BEARISH) return new Color(c.bearish);
-        if (ratio >= t.NEUTRAL_LOW && ratio <= t.NEUTRAL_HIGH) return new Color(c.neutral);
-        if (ratio <= t.BULLISH) return new Color(c.bullish);
-        return new Color(c.extremeBullish);
-    }
 
     /**
      * 取得量比顏色(帶快取)
@@ -567,6 +552,147 @@ function resolveMarketAuto() {
 }
 
 
+// ==================== 核心決策邏輯 ====================
+
+/**
+ * 智能雙模式自動切換
+ * 根據自選股票配置決定顯示模式：自選模式優先，無自選時回退排行榜模式
+ * @returns {Object} { mode: 'watchlist'|'ranking', market: 'US'|'HK'|'AUTO' }
+ */
+function resolveDisplayMode() {
+    const watchlist = CONFIG.CUSTOM_WATCHLIST;
+    
+    // 檢查是否有有效的自選股票
+    if (watchlist && watchlist.length > 0) {
+        // 有自選股票：自選模式
+        console.log(`[模式] 檢測到自選股票 (${watchlist.length} 支)，使用自選模式`);
+        return { mode: 'watchlist', market: 'AUTO' };
+    } else {
+        // 無自選股票：排行榜模式
+        console.log(`[模式] 無自選股票，使用排行榜模式`);
+        const market = CONFIG.MARKET === 'AUTO' ? resolveMarketAuto() : CONFIG.MARKET;
+        return { mode: 'ranking', market };
+    }
+}
+
+/**
+ * 自動市場識別系統
+ * 根據股票代碼格式自動識別所屬市場
+ * @param {string} stockCode - 股票代碼
+ * @returns {'US'|'HK'} 市場代碼
+ */
+function identifyMarket(stockCode) {
+    // 純數字 → 港股，包含字母 → 美股
+    if (/^\d+$/.test(stockCode)) {
+        console.log(`[市場] ${stockCode} 識別為港股 (純數字)`);
+        return 'HK';
+    } else {
+        console.log(`[市場] ${stockCode} 識別為美股 (包含字母)`);
+        return 'US';
+    }
+}
+
+/**
+ * 生成 Lbkrs Counter ID
+ * @param {string} stockCode - 股票代碼
+ * @param {string} instrumentType - 儀器類型 ('ST' 或 'ETF')
+ * @param {string} market - 市場 ('US' 或 'HK')
+ * @returns {string} Counter ID (格式: {TYPE}/{MARKET}/{SYMBOL})
+ */
+function buildCounterId(stockCode, instrumentType, market) {
+    // 港股代碼需要去除前導零，美股保持原樣
+    const formattedCode = market === 'HK' ? String(parseInt(stockCode, 10)) : stockCode;
+    return `${instrumentType}/${market}/${formattedCode}`;
+}
+
+/**
+ * 解析 Lbkrs Counter ID
+ * @param {string} counterId - Lbkrs Counter ID
+ * @returns {Object} 解析結果 { stockCode, instrumentType, market }
+ */
+function parseCounterId(counterId) {
+    const parts = counterId.split('/');
+    if (parts.length !== 3) {
+        throw new Error(`無效的 Counter ID 格式: ${counterId}`);
+    }
+    
+    return {
+        stockCode: parts[2], // 代碼
+        instrumentType: parts[0], // 類型 ST/ETF
+        market: parts[1] // 市場 US/HK
+    };
+}
+
+/**
+ * 根據 counter_id 推斷股票類型
+ * @param {string} counterId - Lbkrs 股票 ID
+ * @returns {string} 股票類型 ('ST' 或 'ETF')
+ */
+function inferInstrumentType(counterId) {
+    return counterId.startsWith('ETF/') ? 'ETF' : 'ST';
+}
+
+/**
+ * 智能重試機制：先試ST，失敗後直接試ETF
+ * @param {string} stockCode - 股票代碼
+ * @param {string} market - 市場
+ * @param {DataFetcher} fetcher - 資料抓取器
+ * @param {string} context - 上下文描述
+ * @returns {Promise<Object>} 成功獲取的數據
+ */
+async function fetchWithRetry(stockCode, market, fetcher, context) {
+    let lastError = null;
+    
+    // 第一步：嘗試ST（股票）
+    try {
+        const counterIdST = buildCounterId(stockCode, 'ST', market);
+        console.log(`[重試] 嘗試 1/2: ${counterIdST}`);
+        const data = await fetcher.fetchLbkrsDetailData(counterIdST, context);
+        
+        if (data && data.data) {
+            console.log(`[重試] 成功: ${counterIdST}`);
+            return { data: data.data, counterId: counterIdST };
+        }
+    } catch (error) {
+        console.log(`[重試] 失敗 1/2: ${error.message}`);
+        lastError = error;
+    }
+    
+    // 第二步：ST失敗後直接嘗試ETF
+    try {
+        const counterIdETF = buildCounterId(stockCode, 'ETF', market);
+        console.log(`[重試] 嘗試 2/2: ${counterIdETF}`);
+        const data = await fetcher.fetchLbkrsDetailData(counterIdETF, context);
+        
+        if (data && data.data) {
+            console.log(`[重試] 成功: ${counterIdETF}`);
+            return { data: data.data, counterId: counterIdETF };
+        }
+    } catch (error) {
+        console.log(`[重試] 失敗 2/2: ${error.message}`);
+        lastError = error;
+    }
+    
+    // 第三步：嘗試美股的另一種格式（僅美股）
+    if (market === 'US') {
+        try {
+            const counterIdST2 = `ST/US/${stockCode}`;
+            console.log(`[重試] 嘗試 3/3: ${counterIdST2}`);
+            const data = await fetcher.fetchLbkrsDetailData(counterIdST2, context);
+            
+            if (data && data.data) {
+                console.log(`[重試] 成功: ${counterIdST2}`);
+                return { data: data.data, counterId: counterIdST2 };
+            }
+        } catch (error) {
+            console.log(`[重試] 失敗 3/3: ${error.message}`);
+            lastError = error;
+        }
+    }
+    
+    throw new Error(`所有嘗試都失敗，最後錯誤: ${lastError?.message || '未知錯誤'}`);
+}
+
 // ==================== 數據映射工具函數 ====================
 
 /**
@@ -575,17 +701,7 @@ function resolveMarketAuto() {
  * @returns {string} 股票代碼
  */
 function extractStockCode(counterId) {
-    const parts = counterId.split('/');
-    return parts[parts.length - 1]; // 提取最後一部分作為代碼
-}
-
-/**
- * 根據 counter_id 推斷股票類型
- * @param {string} counterId - Lbkrs 股票 ID
- * @returns {number} 股票類型 (3=股票, 4=ETF)
- */
-function inferInstrumentType(counterId) {
-    return counterId.startsWith('ETF/') ? 4 : 3;
+    return parseCounterId(counterId).stockCode;
 }
 
 /**
@@ -619,7 +735,7 @@ function mapLbkrsToExisting(lbkrsItem) {
     let industryName;
     const instrumentType = inferInstrumentType(lbkrsItem.counter_id);
     
-    if (instrumentType === 4) {
+    if (instrumentType === 'ETF') {
         // ETF 顯示 ETF 的名稱
         industryName = lbkrsItem.name || 'ETF';
     } else if (industry && typeof industry === 'string' && industry.trim() !== '') {
@@ -643,10 +759,92 @@ function mapLbkrsToExisting(lbkrsItem) {
         changeRatioNum: formattedChangePct, // 使用格式化後的百分比數值
         tradeTrunover: turnover,
         volumnRatio: volumnRatio,
-        instrumentType: inferInstrumentType(lbkrsItem.counter_id),
+        instrumentType: instrumentType === 'ETF' ? 4 : 3,
         industry: industryName,
         // 保留原始數據供調試
         _rawData: lbkrsItem
+    };
+}
+
+/**
+ * 將 Lbkrs Detail API 數據映射到現有系統格式
+ * @param {Object} detailData - Lbkrs Detail API 響應數據
+ * @param {string} counterId - Lbkrs Counter ID
+ * @returns {Object} 映射後的股票數據
+ */
+function mapLbkrsDetailToSystem(detailData, counterId) {
+    if (!detailData) {
+        throw new Error('Lbkrs Detail API 響應數據為空');
+    }
+    
+    const parsed = parseCounterId(counterId);
+    const instrumentType = parsed.instrumentType === 'ETF' ? 4 : 3;
+    
+    // 提取關鍵數據，加強健壯性
+    const price = parseFloat(detailData.last_done) || 0;
+    const changePct = parseFloat(detailData.chg) || 0;
+    const changeAmt = parseFloat(detailData.change) || 0;
+    const volume = detailData.total_amount || detailData.amount || '0';
+    
+    // 嘗試多個成交額字段名稱，確保兼容性
+    const turnover = detailData.balance ||
+                    detailData.total_balance ||
+                    detailData.amount ||
+                    detailData.total_amount ||
+                    detailData.volume ||
+                    '0';
+    
+    const volumnRatio = parseFloat(detailData.volume_rate) || 0;
+    
+    // 計算漲跌幅：根據 Detail API 文檔，需要額外計算 (last_done - prev_close) / prev_close × 100
+    let formattedChangePct;
+    if (detailData.prev_close && parseFloat(detailData.prev_close) > 0) {
+        // 使用計算公式：((收盤價 - 前收盤價) / 前收盤價) × 100
+        const prevClose = parseFloat(detailData.prev_close);
+        formattedChangePct = ((price - prevClose) / prevClose) * 100;
+    } else {
+        // 回退到 API 原始值
+        formattedChangePct = changePct * 100;
+    }
+    const changeRatio = `${formattedChangePct >= 0 ? '+' : ''}${formattedChangePct.toFixed(2)}%`;
+    
+    // 處理產業分類
+    let industryName;
+    if (instrumentType === 4) {
+        industryName = detailData.stock_name || 'ETF';
+    } else {
+        industryName = detailData.industry_name || '--';
+    }
+    
+    // 構建 K 線數據
+    const klineData = {
+        open: parseFloat(detailData.open) || null,
+        high: parseFloat(detailData.high) || null,
+        low: parseFloat(detailData.low) || null,
+        close: price
+    };
+    
+    console.log(`[Detail映射] ${detailData.stock_name || parsed.stockCode} (${parsed.stockCode}):`);
+    console.log(`  價格: ${price}, 漲跌幅: ${formattedChangePct}%`);
+    console.log(`  成交額: ${turnover} (來自 ${Object.keys(detailData).find(k => k.includes('balance') || k.includes('amount') || k.includes('volume')) || '未知字段'})`);
+    console.log(`  產業: ${industryName}`);
+    console.log(`  K線: O${klineData.open} H${klineData.high} L${klineData.low} C${klineData.close}`);
+    
+    return {
+        stockCode: parsed.stockCode,
+        stockName: detailData.stock_name || '--',
+        priceNominal: price,
+        changeRatio: changeRatio,
+        changeRatioNum: formattedChangePct,
+        tradeTrunover: turnover,
+        volumnRatio: volumnRatio,
+        instrumentType: instrumentType,
+        industry: industryName,
+        klineData: klineData,
+        // 標記數據來源
+        _source: 'watchlist',
+        // 保留原始數據供調試
+        _rawData: detailData
     };
 }
 
@@ -655,56 +853,88 @@ function mapLbkrsToExisting(lbkrsItem) {
  * 主函式
  */
 async function main() {
+    const startTime = new Date();
+    console.log(`程式開始: ${startTime.toLocaleString()}`);
+    
     try {
-        const market = CONFIG.MARKET === 'AUTO' ? resolveMarketAuto() : CONFIG.MARKET;
+        // 1. 智能模式決策
+        const { mode, market } = resolveDisplayMode();
+        
         const cache = new CacheManager(CONFIG);
         const fetcher = new DataFetcher(CONFIG);
         const colorCalc = new ColorCalculator(CONFIG);
 
-        // 1. 取得主列表資料(使用市場特定快取)
-        let stockData = cache.get('main', market);
-        if (!stockData?.data?.length) {
-            const rawData = await fetchStockData(fetcher, market);
+        let stockData = [];
+        let timestamp = new Date();
+        let displayMarket = market;
+
+        // 2. 根據模式獲取數據
+        if (mode === 'watchlist') {
+            // 自選股票模式
+            const rawData = await fetchWatchlistData(fetcher, cache);
             if (!rawData || rawData.length === 0) {
-                throw new Error('抓取的成交額資料為空');
+                throw new Error('自選股票數據為空');
             }
-            stockData = { data: rawData, timestamp: new Date() };
-            cache.set('main', market, stockData);
+            stockData = rawData;
+        } else {
+            // 排行榜模式
+            const resolvedMarket = market === 'AUTO' ? resolveMarketAuto() : market;
+            displayMarket = resolvedMarket;
+            
+            let cachedData = cache.get('main', resolvedMarket);
+            if (!cachedData?.data?.length) {
+                const rawData = await fetchStockData(fetcher, resolvedMarket);
+                if (!rawData || rawData.length === 0) {
+                    throw new Error('抓取的成交額資料為空');
+                }
+                cachedData = { data: rawData, timestamp: new Date() };
+                cache.set('main', resolvedMarket, cachedData);
+            }
+            stockData = cachedData.data;
+            timestamp = new Date(cachedData.timestamp);
         }
 
-        // 2. 過濾資料
-        const filteredData = filterData(stockData.data);
+        // 3. 過濾資料
+        const filteredData = filterData(stockData);
         if (filteredData.length === 0) {
             throw new Error('過濾後無資料可顯示');
         }
 
-        // 3. 並發抓取補充資料
-        const enrichedData = await enrichStockData(filteredData, fetcher, cache, market);
+        // 4. 並發抓取補充資料
+        const enrichedData = await enrichStockData(filteredData, fetcher, cache, displayMarket, mode);
 
-        // 4. 計算最大成交額(預先計算,避免重複)
+        // 5. 計算最大成交額(預先計算,避免重複)
         const maxTurnover = enrichedData.length > 0
             ? parseTurnoverToNumber(enrichedData[0].tradeTrunover)
             : 0;
 
-        // 5. 建立 Widget
+        // 6. 建立 Widget
         const widget = await createWidget(
             enrichedData,
-            new Date(stockData.timestamp),
+            timestamp,
             maxTurnover,
             colorCalc,
-            market
+            displayMarket,
+            mode  // 新增mode參數
         );
 
-        // 6. 顯示
-        if (config.runsInWidget) {
+        // 7. 顯示
+        if (typeof config !== 'undefined' && config.runsInWidget) {
             Script.setWidget(widget);
         } else {
             widget.presentLarge();
         }
+        
+        // 8. 執行時間統計
+        const endTime = new Date();
+        const totalTime = endTime - startTime;
+        console.log(`執行完成，總耗時: ${totalTime}ms`);
+        console.log(`模式: ${mode}, 市場: ${displayMarket}, 股票數: ${enrichedData.length}`);
+        
     } catch (error) {
         console.error(error.message);
         const errorWidget = createErrorWidget(error.message);
-        if (config.runsInWidget) {
+        if (typeof config !== 'undefined' && config.runsInWidget) {
             Script.setWidget(errorWidget);
         } else {
             errorWidget.presentLarge();
@@ -715,6 +945,75 @@ async function main() {
 }
 
 // ==================== 資料抓取函式 ====================
+
+/**
+ * 抓取自選股票資料
+ * @param {DataFetcher} fetcher - 資料抓取器
+ * @param {CacheManager} cache - 快取管理器
+ * @returns {Promise<Array>} 自選股票列表
+ */
+async function fetchWatchlistData(fetcher, cache) {
+    const watchlist = CONFIG.CUSTOM_WATCHLIST;
+    console.log(`[自選] 開始獲取 ${watchlist.length} 支股票數據`);
+    
+    // 動態計算並發數
+    const concurrency = Math.min(watchlist.length + 5, 30);
+    console.log(`[自選] 設定並發數: ${concurrency}`);
+    
+    const results = [];
+    const errors = [];
+    
+    // 分批處理以避免過度並發
+    const batchSize = Math.min(concurrency, 10);
+    for (let i = 0; i < watchlist.length; i += batchSize) {
+        const batch = watchlist.slice(i, i + batchSize);
+        const batchPromises = batch.map(async (stockCode) => {
+            try {
+                // 檢查快取
+                const cached = cache.get('watchlist', stockCode);
+                if (cached !== null) {
+                    console.log(`[自選] 快取命中: ${stockCode}`);
+                    return cached;
+                }
+                
+                // 自動識別市場
+                const market = identifyMarket(stockCode);
+                
+                // 使用多輪嘗試機制獲取數據
+                const result = await fetchWithRetry(stockCode, market, fetcher, `watchlist_${stockCode}`);
+                
+                // 映射為系統格式
+                const mappedData = mapLbkrsDetailToSystem(result.data, result.counterId);
+                
+                // 寫入快取
+                cache.set('watchlist', stockCode, mappedData);
+                
+                console.log(`[自選] 成功獲取: ${stockCode}`);
+                return mappedData;
+                
+            } catch (error) {
+                console.error(`[自選] 獲取失敗: ${stockCode} - ${error.message}`);
+                errors.push({ stockCode, error: error.message });
+                return null;
+            }
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults.filter(result => result !== null));
+        
+        // 批次間隔，避免請求過於頻繁
+        if (i + batchSize < watchlist.length) {
+            await fetcher.delay(100);
+        }
+    }
+    
+    console.log(`[自選] 完成，獲取 ${results.length} 支股票，${errors.length} 支失敗`);
+    if (errors.length > 0) {
+        console.log(`[自選] 失敗清單:`, errors.map(e => `${e.stockCode}(${e.error})`).join(', '));
+    }
+    
+    return results;
+}
 
 /**
  * 抓取成交額排行資料 (Lbkrs API)
@@ -735,34 +1034,6 @@ async function fetchStockData(fetcher, market) {
     return data.data.list.map(mapLbkrsToExisting);
 }
 
-/**
- * 抓取單一股票的 Call/Put 比例(僅美股)
- * @param {Object} stock - 股票資料物件
- * @param {DataFetcher} fetcher - 資料抓取器
- * @param {CacheManager} cache - 快取管理器
- * @returns {Promise<number|string>} Call 百分比或 '--'
- */
-async function fetchSingleCallRatio(stock, fetcher, cache) {
-    const cached = cache.get('options', stock.stockCode);
-    if (cached !== null) return cached;
-    
-    try {
-        const path = stock.instrumentType === 4 ? 'etfs' : 'stock';
-        const url = `https://www.futunn.com/hk/${path}/${stock.stockCode}-US/options-chain`;
-        const data = await fetcher.fetchAndParseInitialState(url, `options_${stock.stockCode}`);
-        
-        const putRatio = data?.option_link?.vol?.putRatio;
-        if (putRatio !== undefined && putRatio !== null) {
-            const callRatio = 100 - parseInt(putRatio, 10);
-            cache.set('options', stock.stockCode, callRatio);
-            return callRatio;
-        }
-        return '--';
-    } catch (error) {
-        console.error(`處理 ${stock.stockCode} Call/Put 比例失敗: ${error.message}`);
-        return '--';
-    }
-}
 
 /**
  * 產業分類現在直接從 Lbkrs API 獲取，不再需要網路請求
@@ -795,35 +1066,37 @@ async function fetchSingleKlineData(stock, fetcher, cache, market) {
     if (cached !== null) return cached;
     
     try {
-        // 2. 建立 URL
-        const path = stock.instrumentType === 4 ? 'etfs' : 'stock';
-        const marketSuffix = market === 'US' ? 'US' : 'HK';
-        const url = `https://www.futunn.com/hk/${path}/${stock.stockCode}-${marketSuffix}`;
+        // 2. 自動識別市場（如果未提供）
+        const actualMarket = market || identifyMarket(stock.stockCode);
         
-        // 3. 抓取並解析
-        const data = await fetcher.fetchAndParseInitialState(url, `kline_${stock.stockCode}`);
+        // 3. 生成 Counter ID
+        const instrumentType = stock.instrumentType === 4 ? 'ETF' : 'ST';
+        const counterId = buildCounterId(stock.stockCode, instrumentType, actualMarket);
         
-        // 4. 提取 OHLC
-        const stockInfo = data?.stock_info;
-        if (!stockInfo) {
-            console.error(`${stock.stockCode}: 找不到 stock_info`);
+        // 4. 使用 Lbkrs Detail API 獲取數據
+        const data = await fetcher.fetchLbkrsDetailData(counterId, `kline_${stock.stockCode}`);
+        
+        if (!data?.data) {
+            console.error(`${stock.stockCode}: Lbkrs Detail API 返回無效數據`);
             return null;
         }
         
+        // 5. 提取 OHLC 數據
+        const detailData = data.data;
         const klineData = {
-            open: parseFloat(stockInfo.priceOpen) || null,
-            high: parseFloat(stockInfo.priceHighest) || null,
-            low: parseFloat(stockInfo.priceLowest) || null,
-            close: parseFloat(stock.priceNominal) || null  // 使用主列表的現價
+            open: parseFloat(detailData.open) || null,
+            high: parseFloat(detailData.high) || null,
+            low: parseFloat(detailData.low) || null,
+            close: parseFloat(detailData.last_done) || stock.priceNominal || null
         };
         
-        // 5. 驗證數據完整性
+        // 6. 驗證數據完整性
         if (!klineData.open || !klineData.high || !klineData.low || !klineData.close) {
             console.error(`${stock.stockCode}: K線數據不完整`, klineData);
             return null;
         }
         
-        // 6. 寫入快取
+        // 7. 寫入快取
         cache.set('kline', stock.stockCode, klineData);
         return klineData;
         
@@ -834,39 +1107,60 @@ async function fetchSingleKlineData(stock, fetcher, cache, market) {
 }
 
 /**
- * 並發為所有股票補充產業與期權資料 (性能優化版)
+ * 並發為所有股票補充資料 (性能優化版)
  * @param {Array} data - 股票資料陣列
  * @param {DataFetcher} fetcher - 資料抓取器
  * @param {CacheManager} cache - 快取管理器
  * @param {string} market - 市場代碼
  * @returns {Promise<Array>} 補充後的股票資料陣列
  */
-async function enrichStockData(data, fetcher, cache, market) {
+async function enrichStockData(data, fetcher, cache, market, mode) {
     // 智能欄位檢測：只為顯示的欄位獲取數據
-    const visibleColumns = getActiveColumnSettings(market).filter(c => c.visible);
+    const visibleColumns = getActiveColumnSettings(market, mode).filter(c => c.visible);
     const needsIndustry = visibleColumns.some(col => col.key === 'industry');
-    const needsCallRatio = visibleColumns.some(col => col.key === 'callRatio');
     const needsKline = visibleColumns.some(col => col.key === 'kline');
     
-    console.log(`[優化] 市場: ${market}, 需要產業: ${needsIndustry}, 需要Call%: ${needsCallRatio}, 需要K線: ${needsKline}`);
+    console.log(`[優化] 市場: ${market}, 需要產業: ${needsIndustry}, 需要K線: ${needsKline}`);
     
     const enrichedData = await Promise.all(data.map(async (stock) => {
         // 產業分類：直接從 Lbkrs 獲取 (如果需要顯示)
         const industry = needsIndustry ? stock.industry || '--' : '--';
         
-        // 僅美股抓取 Call% (如果需要顯示)
-        let callRatio = '--';
-        if (needsCallRatio && market === 'US') {
-            callRatio = await fetchSingleCallRatio(stock, fetcher, cache);
-        }
+        // K 線數據：統一使用Detail API，根據數據來源決定獲取方式
+        let klineData = stock.klineData || null;
         
-        // K 線數據補充 (如果需要顯示)
-        let klineData = null;
+        // 智能K線獲取：自選股票直接重建，排行榜模式才調用API
         if (needsKline) {
-            klineData = await fetchSingleKlineData(stock, fetcher, cache, market);
+            if (stock._source === 'watchlist') {
+                // 自選股票：確保K線數據完整性（從_rawData重建或修正）
+                if (stock._rawData) {
+                    const rebuiltKlineData = {
+                        open: parseFloat(stock._rawData.open) || null,
+                        high: parseFloat(stock._rawData.high) || null,
+                        low: parseFloat(stock._rawData.low) || null,
+                        close: parseFloat(stock._rawData.last_done) || stock.priceNominal || null
+                    };
+                    
+                    // 驗證K線數據完整性
+                    const hasValidKline = rebuiltKlineData.open && rebuiltKlineData.high && rebuiltKlineData.low && rebuiltKlineData.close;
+                    if (hasValidKline) {
+                        klineData = rebuiltKlineData;
+                        console.log(`[K線重建] ${stock.stockCode}: O${klineData.open} H${klineData.high} L${klineData.low} C${klineData.close}`);
+                    } else {
+                        console.warn(`[K線警告] ${stock.stockCode} 原始數據不完整: O${rebuiltKlineData.open} H${rebuiltKlineData.high} L${rebuiltKlineData.low} C${rebuiltKlineData.close}`);
+                        klineData = null;
+                    }
+                } else {
+                    console.warn(`[K線警告] ${stock.stockCode} 缺少原始Detail API數據`);
+                    klineData = null;
+                }
+            } else {
+                // 排行榜模式：使用快取或獲取K線數據
+                klineData = await fetchSingleKlineData(stock, fetcher, cache, market);
+            }
         }
         
-        return { ...stock, industry, callRatio, klineData };
+        return { ...stock, industry, klineData };
     }));
     return enrichedData;
 }
@@ -895,7 +1189,11 @@ function filterData(stockList) {
             tradeTrunover: stock.tradeTrunover,
             volumnRatio: stock.volumnRatio, // 已經是數字
             instrumentType: stock.instrumentType,
-            industry: stock.industry // 保留產業數據
+            industry: stock.industry, // 保留產業數據
+            // 保留所有必要的數據字段，特別是K線數據
+            klineData: stock.klineData || null, // 保留K線數據
+            _rawData: stock._rawData || null, // 保留原始Detail API數據
+            _source: stock._source || null // 保留數據來源標記
         }));
 }
 
@@ -904,9 +1202,16 @@ function filterData(stockList) {
 /**
  * 取得當前市場的欄位設定
  * @param {string} market - 市場代碼
+ * @param {string} mode - 顯示模式 ('ranking' 或 'watchlist')
  * @returns {Array} 欄位設定陣列
  */
-function getActiveColumnSettings(market) {
+function getActiveColumnSettings(market, mode) {
+    // 自選股票模式使用混合市場設定
+    if (mode === 'watchlist') {
+        return CONFIG.COLUMN_SETTINGS_MIXED;
+    }
+    
+    // 排行榜模式根據市場選擇
     return market === 'HK' ? CONFIG.COLUMN_SETTINGS_HK : CONFIG.COLUMN_SETTINGS_US;
 }
 
@@ -919,13 +1224,13 @@ function getActiveColumnSettings(market) {
  * @param {string} market - 市場代碼
  * @returns {ListWidget} Widget 物件
  */
-async function createWidget(stockData, updateTime, maxTurnover, colorCalc, market) {
+async function createWidget(stockData, updateTime, maxTurnover, colorCalc, market, mode) {
     const widget = new ListWidget();
     widget.backgroundColor = CONFIG.COLORS.background;
     widget.spacing = 0;
     widget.setPadding(0, 0, 0, 0);
 
-    const visibleColumns = getActiveColumnSettings(market).filter(c => c.visible);
+    const visibleColumns = getActiveColumnSettings(market, mode).filter(c => c.visible);
 
     // 建立標題列
     createHeaderRow(widget, updateTime, visibleColumns, market);
@@ -935,7 +1240,7 @@ async function createWidget(stockData, updateTime, maxTurnover, colorCalc, marke
 
     // 建立資料列
     for (const stock of stockData) {
-        createDataRow(widget, stock, maxTurnover, totalBarWidth, visibleColumns, colorCalc, market);
+        createDataRow(widget, stock, maxTurnover, totalBarWidth, visibleColumns, colorCalc, market, mode);
     }
 
     return widget;
@@ -981,7 +1286,7 @@ function createHeaderRow(widget, updateTime, columns, market) {
  * @param {ColorCalculator} colorCalc - 顏色計算器
  * @param {string} market - 市場代碼
  */
-function createDataRow(widget, stock, maxTurnover, totalBarWidth, columns, colorCalc, market) {
+function createDataRow(widget, stock, maxTurnover, totalBarWidth, columns, colorCalc, market, mode) {
     const rowContainer = widget.addStack();
     rowContainer.layoutVertically();
     const p = CONFIG.UI.ROW_PADDING;
@@ -996,7 +1301,7 @@ function createDataRow(widget, stock, maxTurnover, totalBarWidth, columns, color
 
     // 建立各欄位
     columns.forEach(col => {
-        addColumnCell(rowStack, col, stock, rowColor, colorCalc, market);
+        addColumnCell(rowStack, col, stock, rowColor, colorCalc, market, mode);
     });
 
     // 成交額比例線
@@ -1012,7 +1317,7 @@ function createDataRow(widget, stock, maxTurnover, totalBarWidth, columns, color
  * @param {ColorCalculator} colorCalc - 顏色計算器
  * @param {string} market - 市場代碼
  */
-function addColumnCell(rowStack, col, stock, rowColor, colorCalc, market) {
+function addColumnCell(rowStack, col, stock, rowColor, colorCalc, market, mode) {
     const colStack = rowStack.addStack();
     colStack.size = new Size(col.width, 0);
     colStack.centerAlignContent();
@@ -1023,13 +1328,8 @@ function addColumnCell(rowStack, col, stock, rowColor, colorCalc, market) {
         return;
     }
 
-    const value = formatColumnValue(col.key, stock, market);
-
-    if (col.key === 'callRatio' && stock.callRatio !== '--') {
-        addCallRatioLabel(colStack, value, stock.callRatio, colorCalc);
-    } else {
-        addTextCell(colStack, value, col.key, stock, rowColor, colorCalc);
-    }
+    const value = formatColumnValue(col.key, stock, market, mode);
+    addTextCell(colStack, value, col.key, stock, rowColor, colorCalc);
 }
 
 /**
@@ -1120,17 +1420,41 @@ function drawKline(colStack, klineData, config) {
  * @param {string} market - 市場代碼
  * @returns {string} 格式化後的值
  */
-function formatColumnValue(key, stock, market) {
+function formatColumnValue(key, stock, market, mode) {
+    console.log(`[格式化] 欄位: ${key}, 模式: ${mode}, 代碼: ${stock.stockCode}, 名稱: ${stock.stockName}`);
+    
     switch (key) {
         case 'stockCode':
             // 美股:去前導零(如有),港股:保持原樣或去前導零
-            return /^\d+$/.test(stock.stockCode) 
-                ? String(parseInt(stock.stockCode, 10)) 
+            return /^\d+$/.test(stock.stockCode)
+                ? String(parseInt(stock.stockCode, 10))
                 : stock.stockCode;
         
         case 'stockName':
             // 港股名稱
             return stock.stockName || '--';
+        
+        case 'stockDisplay':
+            // 混合市場顯示：美股顯示代號，港股顯示中文名稱
+            console.log(`[stockDisplay] 開始處理: mode=${mode}, stockCode=${stock.stockCode}, stockName=${stock.stockName}`);
+            
+            if (mode === 'watchlist') {
+                // 根據識別的市場類型決定顯示格式
+                if (/^\d+$/.test(stock.stockCode)) {
+                    // 純數字 = 港股，顯示中文名稱
+                    const displayName = stock.stockName || stock.stockCode;
+                    console.log(`[stockDisplay] 港股 -> 顯示名稱: ${displayName}`);
+                    return displayName;
+                } else {
+                    // 包含字母 = 美股，顯示代號
+                    console.log(`[stockDisplay] 美股 -> 顯示代號: ${stock.stockCode}`);
+                    return stock.stockCode;
+                }
+            }
+            
+            // 回退到舊的邏輯
+            console.log(`[stockDisplay] 非watchlist模式 -> 回退邏輯: ${stock.stockCode}`);
+            return stock.stockCode;
         
         case 'priceNominal':
             return stock.priceNominal.toFixed(2);
@@ -1149,25 +1473,6 @@ function formatColumnValue(key, stock, market) {
     }
 }
 
-/**
- * 新增 Call% 色塊標籤
- * @param {WidgetStack} colStack - 欄位容器
- * @param {string} value - 顯示值
- * @param {number} callRatio - Call 百分比
- * @param {ColorCalculator} colorCalc - 顏色計算器
- */
-function addCallRatioLabel(colStack, value, callRatio, colorCalc) {
-    const labelContainer = colStack.addStack();
-    labelContainer.backgroundColor = colorCalc.getCallRatioColor(parseFloat(callRatio));
-    labelContainer.cornerRadius = CONFIG.UI.CALL_LABEL_CORNER_RADIUS;
-    const lp = CONFIG.UI.CALL_LABEL_PADDING;
-    labelContainer.setPadding(lp.top, lp.left, lp.bottom, lp.right);
-    
-    const colText = labelContainer.addText(String(value));
-    colText.font = Font.mediumSystemFont(CONFIG.FONT_SIZE);
-    colText.textColor = new Color(CONFIG.UI.CALL_LABEL_TEXT_COLOR);
-    colText.lineLimit = 1;
-}
 
 /**
  * 新增一般文字儲存格
