@@ -1,5 +1,5 @@
 // Lbkrs 港股/美股成交額 Widget
-// 版本: 2.4-Refactor
+// 版本: 2.5-EnhancedBars
 // 日期: 2025-11-06
 
 // ==================== 設定區 ====================
@@ -129,6 +129,14 @@ const CONFIG = {
         HEADER_PADDING: { top: 4, left: 12, bottom: 4, right: 12 },
         ROW_PADDING: { top: 0, left: 12, bottom: 0, right: 12 },
         PROGRESS_BAR_HEIGHT: 1,
+        
+        // 新增：成交額線條配置
+        TURNOVER_BAR: {
+            MIN_WIDTH: 1,          // 最小線條寬度
+            BACKGROUND_OPACITY: 0.1, // 背景透明度
+            BAR_OPACITY: 1.0,      // 線條不透明度
+            MINIMAL_BAR_OPACITY: 0.3 // 最小線條透明度
+        }
     }
 };
 
@@ -1120,23 +1128,60 @@ function addTextCell(colStack, value, key, stock, rowColor, colorCalc) {
 }
 
 /**
- * 新增成交額比例線
+ * 新增成交額比例線 (改進版)
+ * @param {WidgetStack} rowContainer - 行容器
+ * @param {Object} stock - 股票數據
+ * @param {number} maxTurnover - 最高成交額
+ * @param {number} totalBarWidth - 總欄位寬度
+ * @param {Color} rowColor - 行顏色
  */
 function addProgressBar(rowContainer, stock, maxTurnover, totalBarWidth, rowColor) {
+    // 計算成交額比例
     const currentTurnover = parseTurnoverToNumber(stock.tradeTurnover);
-    const ratio = maxTurnover > 0 ? Math.min(currentTurnover / maxTurnover, 1) : 0;
-    const barWidth = totalBarWidth * ratio;
-
+    
+    // 處理無效數據
+    if (maxTurnover <= 0 || currentTurnover <= 0) {
+        addMinimalBar(rowContainer, totalBarWidth);
+        return;
+    }
+    
+    // 計算比例 (0-1之間)
+    const ratio = Math.min(currentTurnover / maxTurnover, 1);
+    
+    // 計算線條寬度 (使用新配置)
+    const barWidth = Math.max(totalBarWidth * ratio, CONFIG.UI.TURNOVER_BAR.MIN_WIDTH);
+    
+    // 建立線條容器
     const barContainer = rowContainer.addStack();
     barContainer.size = new Size(totalBarWidth, CONFIG.UI.PROGRESS_BAR_HEIGHT);
-    barContainer.backgroundColor = new Color("#888888", 0.2);
+    barContainer.backgroundColor = new Color("#888888", CONFIG.UI.TURNOVER_BAR.BACKGROUND_OPACITY);
 
-    if (barWidth > 0) {
+    if (barWidth >= CONFIG.UI.TURNOVER_BAR.MIN_WIDTH) {
+        // 繪製成交額線條
         const progressBar = barContainer.addStack();
         progressBar.size = new Size(barWidth, CONFIG.UI.PROGRESS_BAR_HEIGHT);
         progressBar.backgroundColor = rowColor;
+        progressBar.cornerRadius = 0;
+        
+        // 添加右側間距
         barContainer.addSpacer();
     }
+}
+
+/**
+ * 繪製最小線條 (用於無成交額數據)
+ * @param {WidgetStack} rowContainer - 行容器
+ * @param {number} totalBarWidth - 總欄位寬度
+ */
+function addMinimalBar(rowContainer, totalBarWidth) {
+    const barContainer = rowContainer.addStack();
+    barContainer.size = new Size(totalBarWidth, CONFIG.UI.PROGRESS_BAR_HEIGHT);
+    barContainer.backgroundColor = new Color("#888888", CONFIG.UI.TURNOVER_BAR.BACKGROUND_OPACITY);
+    
+    const minimalBar = barContainer.addStack();
+    minimalBar.size = new Size(2, CONFIG.UI.PROGRESS_BAR_HEIGHT);
+    minimalBar.backgroundColor = new Color("#CCCCCC", CONFIG.UI.TURNOVER_BAR.MINIMAL_BAR_OPACITY);
+    barContainer.addSpacer();
 }
 
 /**
@@ -1188,7 +1233,7 @@ function drawKline(colStack, klineData, config) {
         upperShadow.backgroundColor = color;
     }
     
-    if (bodyHeight > 0) {
+    if (bodyHeight >= 0) {
         const body = klineContainer.addStack();
         body.size = new Size(BODY_WIDTH, Math.max(bodyHeight, 1));
         body.backgroundColor = color;
@@ -1325,9 +1370,9 @@ async function main() {
         // 5. 補充 K線數據
         const enrichedData = await enrichData(filteredData, fetcher, caches, displayMarket, mode);
 
-        // 6. 計算最大成交額
+        // 6. 計算表格中所有股票的最高成交額
         const maxTurnover = enrichedData.length > 0
-            ? parseTurnoverToNumber(enrichedData[0].tradeTurnover)
+            ? Math.max(...enrichedData.map(stock => parseTurnoverToNumber(stock.tradeTurnover)))
             : 0;
 
         // 7. 建立 Widget
