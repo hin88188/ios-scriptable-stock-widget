@@ -1,6 +1,6 @@
 // Lbkrs 港股/美股成交額 Widget
-// 版本: 2.5-EnhancedBars
-// 日期: 2025-11-06
+// 版本: 2.6-LbkrsClient
+// 日期: 2025-11-08
 
 // ==================== 設定區 ====================
 const CONFIG = {
@@ -31,10 +31,11 @@ const CONFIG = {
     // Cookie（選填）
     COOKIES: '',
 
-    // 市場 URL 配置
+    // 市場 URL / Endpoint 配置（僅作為基底，實際組裝由 LbkrsClient 處理）
     MARKET_URLS: {
-        US: 'https://m-gl.lbkrs.com/api/forward/newmarket/revision/rank/pc/list?key=all&market=US&indicators[]=last_done&indicators[]=chg&indicators[]=change&indicators[]=total_amount&indicators[]=total_balance&indicators[]=turnover_rate&indicators[]=amplitude&indicators[]=volume_rate&indicators[]=depth_rate&indicators[]=pb_ttm&indicators[]=market_cap&indicators[]=five_min_chg&indicators[]=five_day_chg&indicators[]=ten_day_chg&indicators[]=twenty_day_chg&indicators[]=this_year_chg&indicators[]=half_year_chg&indicators[]=industry&sort_indicator=total_balance&order=desc&offset=0&limit=40',
-        HK: 'https://m-gl.lbkrs.com/api/forward/newmarket/revision/rank/pc/list?key=all&market=HK&indicators[]=last_done&indicators[]=chg&indicators[]=change&indicators[]=total_amount&indicators[]=total_balance&indicators[]=turnover_rate&indicators[]=amplitude&indicators[]=volume_rate&indicators[]=depth_rate&indicators[]=pb_ttm&indicators[]=market_cap&indicators[]=five_min_chg&indicators[]=five_day_chg&indicators[]=ten_day_chg&indicators[]=twenty_day_chg&indicators[]=this_year_chg&indicators[]=half_year_chg&indicators[]=industry&sort_indicator=total_balance&order=desc&offset=0&limit=40'
+        BASE: 'https://m-gl.lbkrs.com',
+        RANKING_PATH: '/api/forward/newmarket/revision/rank/pc/list',
+        DETAIL_PATH: '/api/forward/v3/quote/stock/detail'
     },
 
     // K 線配置
@@ -394,7 +395,7 @@ class KlineDataProcessor {
     /**
      * 獲取股票的 K線數據
      * @param {Object} stock - 股票數據
-     * @param {DataFetcher} fetcher - 數據抓取器
+     * @param {LbkrsClient} fetcher - 數據抓取器（相容舊介面，需提供 fetchLbkrsDetailData）
      * @param {Object} caches - 快取管理器集合
      * @returns {Promise<Object|null>} K線數據或 null
      */
@@ -678,37 +679,129 @@ class DataFetcher {
         }
     }
 
-    async fetchLbkrsApi(url, context) {
+    async fetchJson(url, context) {
         try {
             const html = await this.fetchWithRetry(url);
             const data = JSON.parse(html);
-            
             if (data.code !== 0) {
                 throw new Error(`Lbkrs API 錯誤: ${data.message || '未知錯誤'}`);
             }
-            
             return data;
         } catch (e) {
             saveDebugFile(`debug_${context}_error.txt`, `URL: ${url}\nError: ${e.message}`);
             throw new Error(`${context} API 請求失敗: ${e.message}`);
         }
     }
+}
 
-    async fetchLbkrsDetailData(counterId, context) {
-        const url = `https://m-gl.lbkrs.com/api/forward/v3/quote/stock/detail?counter_id=${counterId}`;
-        try {
-            const html = await this.fetchWithRetry(url);
-            const data = JSON.parse(html);
-            
-            if (data.code !== 0) {
-                throw new Error(`Detail API 錯誤: ${data.message || '未知錯誤'}`);
-            }
-            
-            return data;
-        } catch (e) {
-            saveDebugFile(`debug_${context}_error.txt`, `URL: ${url}\nError: ${e.message}`);
-            throw new Error(`${context} Detail API 失敗: ${e.message}`);
+/**
+ * Lbkrs Endpoint Registry + Client
+ * 負責集中管理 URL/Query 組裝與原始 JSON 取得
+ */
+class LbkrsClient {
+    constructor(config) {
+        this.config = config;
+        this.fetcher = new DataFetcher(config);
+        this.base = config.MARKET_URLS.BASE;
+        this.paths = {
+            ranking: config.MARKET_URLS.RANKING_PATH,
+            detail: config.MARKET_URLS.DETAIL_PATH
+        };
+        this.defaultRankingQuery = {
+            key: 'all',
+            indicators: [
+                'last_done',
+                'chg',
+                'change',
+                'total_amount',
+                'total_balance',
+                'turnover_rate',
+                'amplitude',
+                'volume_rate',
+                'depth_rate',
+                'pb_ttm',
+                'market_cap',
+                'five_min_chg',
+                'five_day_chg',
+                'ten_day_chg',
+                'twenty_day_chg',
+                'this_year_chg',
+                'half_year_chg',
+                'industry'
+            ],
+            sort_indicator: 'total_balance',
+            order: 'desc',
+            offset: 0,
+            limit: 40
+        };
+    }
+
+    buildUrl(path, query, extraIndicators = []) {
+        const parts = [];
+
+        if (query) {
+            Object.keys(query).forEach(key => {
+                const value = query[key];
+                if (value === undefined || value === null) return;
+
+                if (key === 'indicators' && Array.isArray(value)) {
+                    value.concat(extraIndicators).forEach(ind => {
+                        parts.push(`indicators[]=${encodeURIComponent(ind)}`);
+                    });
+                } else {
+                    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+                }
+            });
         }
+
+        const qs = parts.length ? `?${parts.join('&')}` : '';
+        return `${this.base}${path}${qs}`;
+    }
+
+    /**
+     * 取得成交額排行榜原始 list
+     * @param {'US'|'HK'} market
+     * @returns {Promise<Array>}
+     */
+    async getRankingList(market) {
+        const query = {
+            ...this.defaultRankingQuery,
+            market
+        };
+
+        const url = this.buildUrl(this.paths.ranking, query);
+        const data = await this.fetcher.fetchJson(url, `ranking_${market}`);
+
+        if (!data?.data?.list || !Array.isArray(data.data.list)) {
+            throw new Error(`${market} 排行榜數據格式錯誤`);
+        }
+
+        return data.data.list;
+    }
+
+    /**
+     * 依 counterId 取得 Detail 原始資料
+     * @param {string} counterId
+     * @param {string} context
+     */
+    async getDetailByCounterId(counterId, context) {
+        const query = { counter_id: counterId };
+        const url = this.buildUrl(this.paths.detail, query);
+        const data = await this.fetcher.fetchJson(url, context || `detail_${counterId}`);
+
+        if (!data?.data) {
+            throw new Error(`Detail API 數據格式錯誤 (${counterId})`);
+        }
+
+        return data.data;
+    }
+
+    /**
+     * 供舊邏輯使用的兼容方法：模擬舊 fetchLbkrsDetailData 簽名
+     */
+    async fetchLbkrsDetailData(counterId, context) {
+        const detailData = await this.getDetailByCounterId(counterId, context);
+        return { code: 0, data: detailData };
     }
 }
 
@@ -843,23 +936,17 @@ function resolveDisplayMode() {
 
 // ==================== 資料抓取函式 ====================
 /**
- * 抓取排行榜數據
+ * 抓取排行榜數據（改用 LbkrsClient）
  */
-async function fetchRanking(fetcher, market) {
-    const url = CONFIG.MARKET_URLS[market];
-    const data = await fetcher.fetchLbkrsApi(url, `ranking_${market}`);
-    
-    if (!data?.data?.list || !Array.isArray(data.data.list)) {
-        throw new Error(`${market} 排行榜數據格式錯誤`);
-    }
-    
-    return data.data.list.map(item => StockDataMapper.fromRankingAPI(item));
+async function fetchRanking(client, market) {
+    const rawList = await client.getRankingList(market);
+    return rawList.map(item => StockDataMapper.fromRankingAPI(item));
 }
 
 /**
  * 抓取自選股票數據（優化版）
  */
-async function fetchWatchlist(fetcher, caches) {
+async function fetchWatchlist(client, caches) {
     const watchlist = CONFIG.CUSTOM_WATCHLIST;
     console.log(`[自選] 開始獲取 ${watchlist.length} 支股票`);
     
@@ -883,7 +970,7 @@ async function fetchWatchlist(fetcher, caches) {
                 const market = CounterIdHelper.identifyMarket(stockCode);
                 
                 // 多輪嘗試獲取數據
-                const result = await tryFetchStock(stockCode, market, fetcher);
+                const result = await tryFetchStock(stockCode, market, client);
                 
                 // 映射為標準格式
                 const mappedData = StockDataMapper.fromDetailAPI(result.data, result.counterId);
@@ -916,7 +1003,7 @@ async function fetchWatchlist(fetcher, caches) {
 /**
  * 多輪嘗試獲取股票數據
  */
-async function tryFetchStock(stockCode, market, fetcher) {
+async function tryFetchStock(stockCode, market, client) {
     const attempts = [
         { type: 'ST', label: '股票' },
         { type: 'ETF', label: 'ETF' }
@@ -934,11 +1021,11 @@ async function tryFetchStock(stockCode, market, fetcher) {
             const counterId = CounterIdHelper.build(stockCode, market, type);
             console.log(`[重試] ${i + 1}/${attempts.length} (${label}): ${counterId}`);
             
-            const data = await fetcher.fetchLbkrsDetailData(counterId, `stock_${stockCode}`);
+            const detail = await client.getDetailByCounterId(counterId, `stock_${stockCode}`);
             
-            if (data?.data) {
+            if (detail) {
                 console.log(`[重試] 成功: ${counterId}`);
-                return { data: data.data, counterId };
+                return { data: detail, counterId };
             }
         } catch (error) {
             console.log(`[重試] 失敗 ${i + 1}/${attempts.length}: ${error.message}`);
@@ -968,7 +1055,7 @@ function filterData(stockList) {
 /**
  * 補充 K線數據
  */
-async function enrichData(data, fetcher, caches, market, mode) {
+async function enrichData(data, client, caches, market, mode) {
     const visibleColumns = getColumns(market, mode).filter(c => c.visible);
     const needsKline = visibleColumns.some(col => col.key === 'kline');
     
@@ -981,7 +1068,7 @@ async function enrichData(data, fetcher, caches, market, mode) {
     
     return Promise.all(data.map(async (stock) => ({
         ...stock,
-        klineData: await KlineDataProcessor.fetch(stock, fetcher, caches)
+        klineData: await KlineDataProcessor.fetch(stock, client, caches)
     })));
 }
 
@@ -1326,7 +1413,7 @@ async function main() {
         const { mode, market } = resolveDisplayMode();
         
         // 2. 初始化組件
-        const fetcher = new DataFetcher(CONFIG);
+        const client = new LbkrsClient(CONFIG);
         const colorCalc = new ColorCalculator(CONFIG);
         const caches = {
             ranking: new RankingCache(CONFIG),
@@ -1340,7 +1427,7 @@ async function main() {
 
         // 3. 獲取數據
         if (mode === 'watchlist') {
-            stockData = await fetchWatchlist(fetcher, caches);
+            stockData = await fetchWatchlist(client, caches);
             if (!stockData || stockData.length === 0) {
                 throw new Error('自選股票數據為空');
             }
@@ -1350,7 +1437,7 @@ async function main() {
             
             let cachedData = caches.ranking.get(resolvedMarket);
             if (!cachedData?.data?.length) {
-                const rawData = await fetchRanking(fetcher, resolvedMarket);
+                const rawData = await fetchRanking(client, resolvedMarket);
                 if (!rawData || rawData.length === 0) {
                     throw new Error('排行榜數據為空');
                 }
@@ -1368,7 +1455,7 @@ async function main() {
         }
 
         // 5. 補充 K線數據
-        const enrichedData = await enrichData(filteredData, fetcher, caches, displayMarket, mode);
+        const enrichedData = await enrichData(filteredData, client, caches, displayMarket, mode);
 
         // 6. 計算表格中所有股票的最高成交額
         const maxTurnover = enrichedData.length > 0
