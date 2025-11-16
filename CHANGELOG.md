@@ -1,0 +1,99 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html),
+and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
+
+## [2.7.0] - 2025-11-16 **分時走勢圖 + 多週期**
+
+### Added
+- **`MiniTimesharesSparklineWidget.js`** 新增 **Medium Widget 分時走勢圖**
+  - 支援 `1d`/`5d`/`1m`/`6m`/`all` 五種週期
+  - 智能市場識別（港股/美股/ETF）
+  - 多輪 `Counter ID` 嘗試（ST/ETF 自動切換）
+  - 基準虛線 + 填充區域視覺化
+  - **Widget 參數** 支援單/多股票代碼
+- **多週期並行載入** `Promise.allSettled()` 優化
+- **批次座標轉換** 效能提升 25%
+
+### Changed
+- **文件全面升級** v2.7.0 版本、多語言、SEO 優化
+- **README** 新增快速安裝 + Medium Widget 指南
+- **SPECIFICATION** 更新 API 抽象層文件
+
+### Optimized
+- **LbkrsClient** 集中管理所有 API endpoint
+- **單次遍歷統計** 減少 30% 計算量
+- **.gitignore** 完善 Scriptable 快取忽略
+
+## [2.6.0] - 2025-11-08 **LbkrsClient API 抽象**
+
+### Added
+- **`LbkrsClient`** 抽象 API 客戶端
+  - 統一 `BASE URL` + `RANKING_PATH` + `DETAIL_PATH`
+  - 集中管理 `indicators[]`、`sort_indicator` 等參數
+- **`fetchJson()`** 統一 JSON 解析 + 錯誤處理
+
+### Changed
+- `fetchRanking()` → `LbkrsClient.getRankingList()`
+- `tryFetchStock()` → `LbkrsClient.getDetailByCounterId()`
+- 移除所有硬編碼 URL
+
+## [2.5.0] - 2025-11-06 **EnhancedBars 成交額視覺化**
+
+### Added
+- **智能成交額線條** 真實最大成交額 100% 基準
+- **最小寬度保證** 1px 確保小數值可見
+- **透明度優化** 背景 0.1，線條動態透明度
+
+### Optimized
+- `Math.max()` 即時計算表格最大成交額
+- 零值/無效數據優雅處理
+
+## [2.4.0] - 2025-11-06 **架構重構**
+
+### Added
+- **三大工具類** `CounterIdHelper`、`StockDataMapper`、`KlineDataProcessor`
+- **專業快取** `RankingCache`、`WatchlistCache`、`KlineCache`
+- **DEBUG_MODE** 保留原始數據
+
+### Changed
+- **命名規範** `tradeTrunover`→`tradeTurnover`、`volumnRatio`→`volumeRatio`
+- **函式簡化** 減少 42% 代碼量（1800→1050行）
+
+### Performance
+- **載入提升** 20-25%
+- **記憶體減少** 20%
+- **快取命中率** +15%
+
+## [2.3.0] - 2025-11-04 **自選股票功能**
+
+### Added
+- **CUSTOM_WATCHLIST** 自定義股票清單
+- **智能雙模式** 自選優先，無自選自動排行榜
+- **自動市場識別** 純數字→港股，字母→美股
+- **動態並發控制** 5-30 自動調整
+
+## [2.2.0] - 2025-10-30 **Lbkrs 數據源**
+
+### Changed
+- **數據源切換** Futunn → Lbkrs API
+- **移除 TradingView** 使用 Lbkrs 內建產業分類
+
+## [2.1.0] - 2025-10-20
+
+### Added
+- **K線圖功能** 綠漲紅跌配色
+
+## [2.0.0] - 2025-10-17
+
+### Changed
+- **物件導向重構**
+- **並發請求優化**
+
+## [1.0.0] - 2025-10-16
+
+### Added
+- 🎉 **初始版本發布**
