@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [2.8.0] - 2025-11-18 **Sparkline 隨機股票顯示**
+
+### Added
+- **CONFIG.RANDOM**: `'none' | 'cus'(自選隨機) | 'rank'(排行前50純隨機)
+- **CONFIG.RANK_TOP_N**: 預設 `50`，純隨機（非加權成交額）
+- **CONFIG.symbol**: 支援逗號分隔多股票 `'NVDA,AAPL,0700'`
+- Header 標籤：`[CUS]/[RANK]` 指示模式
+- **1分鐘排行快取**：`sparkline_ranking_US/HK.json`
+- 港股顯示**股票名稱**（阿里巴巴-W，非 0700）
+
+### Performance
+- 快取命中 **<1s**，首次請求 **~1.5s**
+- 市場切換 **100% 同步 Widget.js v2.6**
+
 ## [2.7.0] - 2025-11-16 **分時走勢圖 + 多週期**
 
 ### Added

@@ -1,6 +1,6 @@
-// Lbkrs 港股/美股成交額 Widget
-// 版本: 2.6-LbkrsClient
-// 日期: 2025-11-08
+// Widget.js
+// 盤中成交額排行 Widget - 支持美股/港股
+// 版本: v2.8.0
 
 // ==================== 設定區 ====================
 const CONFIG = {
@@ -910,9 +910,10 @@ function resolveMarketAuto() {
 
     if (hkDay === 0 || hkDay === 6) return 'US';
 
+    // 維持收市後~另一股開市前 1 小時為同一市場
     if (hkDay >= 1 && hkDay <= 5) {
-        if (hkTime > 16 * 60 && hkTime < 21 * 60 + 30) return 'HK';
-        if (hkTime > 4 * 60 && hkTime < 9 * 60 + 30) return 'US';
+        if (hkTime > 16 * 60 && nyTime < 8 * 60 + 30) return 'HK';  // 港股收市後
+        if (nyTime > 4 * 60 && hkTime < 8 * 60 + 30) return 'US';   // 美股開市前
     }
 
     return 'US';
@@ -1281,62 +1282,60 @@ function drawKline(colStack, klineData, config) {
     }
     
     const { open, high, low, close } = klineData;
-    const { WIDTH, HEIGHT, BODY_WIDTH, SHADOW_WIDTH, GAIN_COLOR, LOSS_COLOR, NEUTRAL_COLOR } = config;
+    const { WIDTH, HEIGHT, SHADOW_WIDTH, GAIN_COLOR, LOSS_COLOR, NEUTRAL_COLOR } = config;
     
-    let color;
+    // 決定顏色
+    let colorHex;
     if (close > open) {
-        color = new Color(GAIN_COLOR);
+        colorHex = GAIN_COLOR;
     } else if (close < open) {
-        color = new Color(LOSS_COLOR);
+        colorHex = LOSS_COLOR;
     } else {
-        color = new Color(NEUTRAL_COLOR);
+        colorHex = NEUTRAL_COLOR;
     }
+    const color = new Color(colorHex);
+
+    // 使用 DrawContext 繪製
+    const ctx = new DrawContext();
+    ctx.size = new Size(WIDTH, HEIGHT);
+    ctx.opaque = false;
+    ctx.respectScreenScale = true;
+
+    // 座標計算 (Y軸向下，0為頂部)
+    // 防止除以零
+    const range = Math.max(high - low, 0.01);
+    // 將價格映射到高度 (high -> 0, low -> HEIGHT)
+    const getY = (price) => HEIGHT - ((price - low) / range) * HEIGHT;
+
+    const yHigh = getY(high);
+    const yLow = getY(low);
+    const yOpen = getY(open);
+    const yClose = getY(close);
+
+    // 1. 繪製影線 (Line)
+    const xCenter = WIDTH / 2;
+    const path = new Path();
+    path.move(new Point(xCenter, yHigh));
+    path.addLine(new Point(xCenter, yLow));
+    ctx.addPath(path);
+    ctx.setStrokeColor(color);
+    ctx.setLineWidth(SHADOW_WIDTH);
+    ctx.strokePath();
+
+    // 2. 繪製實體 (Rect)
+    const bodyTop = Math.min(yOpen, yClose);
+    // 確保實體至少有 1px 高度以便可見
+    const bodyHeight = Math.max(Math.abs(yOpen - yClose), 1);
+    const bodyRect = new Rect(0, bodyTop, WIDTH, bodyHeight);
     
-    const range = high - low;
-    if (range === 0) {
-        const lineStack = colStack.addStack();
-        lineStack.size = new Size(WIDTH, SHADOW_WIDTH);
-        lineStack.backgroundColor = color;
-        return;
-    }
-    
-    const upperShadowHeight = ((high - Math.max(open, close)) / range) * HEIGHT;
-    const bodyHeight = (Math.abs(close - open) / range) * HEIGHT;
-    const lowerShadowHeight = ((Math.min(open, close) - low) / range) * HEIGHT;
-    
-    const klineContainer = colStack.addStack();
-    klineContainer.layoutVertically();
-    klineContainer.size = new Size(WIDTH, HEIGHT);
-    klineContainer.centerAlignContent();
-    
-    if (upperShadowHeight > 0) {
-        const upperShadowRow = klineContainer.addStack();
-        upperShadowRow.layoutHorizontally();
-        upperShadowRow.size = new Size(WIDTH, upperShadowHeight);
-        upperShadowRow.centerAlignContent();
-        
-        const upperShadow = upperShadowRow.addStack();
-        upperShadow.size = new Size(SHADOW_WIDTH, upperShadowHeight);
-        upperShadow.backgroundColor = color;
-    }
-    
-    if (bodyHeight >= 0) {
-        const body = klineContainer.addStack();
-        body.size = new Size(BODY_WIDTH, Math.max(bodyHeight, 1));
-        body.backgroundColor = color;
-        body.cornerRadius = 0;
-    }
-    
-    if (lowerShadowHeight > 0) {
-        const lowerShadowRow = klineContainer.addStack();
-        lowerShadowRow.layoutHorizontally();
-        lowerShadowRow.size = new Size(WIDTH, lowerShadowHeight);
-        lowerShadowRow.centerAlignContent();
-        
-        const lowerShadow = lowerShadowRow.addStack();
-        lowerShadow.size = new Size(SHADOW_WIDTH, lowerShadowHeight);
-        lowerShadow.backgroundColor = color;
-    }
+    ctx.setFillColor(color);
+    ctx.fillRect(bodyRect);
+
+    // 輸出圖片
+    const img = ctx.getImage();
+    const imgWidget = colStack.addImage(img);
+    imgWidget.imageSize = new Size(WIDTH, HEIGHT);
+    imgWidget.centerAlignImage();
 }
 
 /**

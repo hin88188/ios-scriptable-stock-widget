@@ -1,10 +1,13 @@
 // MiniTimesharesSparklineWidget.js
-// 盤中分時走勢圖 - 支持美股/港股/ETF
+// 盤中分時走勢圖 - 支持美股/港股/ETF/隨機模式
 
 // ==================== 配置區 ====================
 const CONFIG = {
-  symbol: 'NVDA',           // 預設股票/ETF 代碼
-  period: 'all',            // 預設週期: 1d / 5d / 1m / 6m / all
+  // 隨機股票選擇配置
+  RANDOM: 'none',    // 'none' | 'cus' (自選隨機) | 'rank' (排行隨機)
+  RANK_TOP_N: 50,    // 排行前 N 支純隨機選一支
+  symbol: 'NVDA',    // 預設股票/ETF 代碼，支持逗號分隔 'NVDA,AAPL,0700'
+  period: 'all',     // 預設週期: 1d / 5d / 1m / 6m / all
   
   // API 端點
   api: {
@@ -42,21 +45,24 @@ const CONFIG = {
 // ==================== 主程式 ====================
 async function main() {
   try {
-    // 1. 解析參數
-    const symbol = getParam() || CONFIG.symbol;
+    // 1. 解析參數 (支援隨機模式)
+    const symbol = await getRandomSymbol();
     const period = CONFIG.period;
+    console.log(`[主流程] 最終選擇股票: ${symbol}`);
     
     // 2. 判斷市場（純數字=港股，否則=美股）
     const isHK = /^[0-9]+$/.test(symbol);
     const market = isHK ? 'HK' : 'US';
     
     // 3. 多輪嘗試建立有效的 counter_id（支援 ST 和 ETF 類型）
-    const { counterId, type } = await tryBuildCounterId(symbol, market);
-    console.log(`[成功] 使用 ${type} 類型: ${counterId}`);
+    const { counterId, type, displayName, preFetchedData } = await tryBuildCounterId(symbol, market);
+    console.log(`[成功] 使用 ${type} 類型: ${counterId}, 顯示: ${displayName || symbol}`);
 
     // 4. 獲取數據並建立模型
-    const model = await buildModel(counterId, market, period);
+    const model = await buildModel(counterId, market, period, preFetchedData);
     model.symbol = symbol;
+    model.displayName = displayName;  // 港股顯示名稱，美股顯示代碼
+    model.randomMode = CONFIG.RANDOM; // 傳遞給 UI 顯示
     model.period = period;
     
     // 5. 創建並顯示 Widget
@@ -78,7 +84,7 @@ async function main() {
  * 統一數據模型建構
  * 返回: 單一週期模型或多週期模型數組
  */
-async function buildModel(counterId, market, period) {
+async function buildModel(counterId, market, period, preFetchedData) {
   // 處理 All 週期
   if (period === 'all') {
     console.log(`[Model] 開始建構 All 週期模型...`);
@@ -86,7 +92,13 @@ async function buildModel(counterId, market, period) {
   }
 
   // 步驟 1: 獲取原始數據
-  const json = await fetchData(counterId, period);
+  let json;
+  if (period === '1d' && preFetchedData) {
+    console.log(`[Model] 使用預抓取的 1d 數據，節省一次請求`);
+    json = preFetchedData;
+  } else {
+    json = await fetchData(counterId, period);
+  }
 
   // 步驟 2: 標準化為統一格式 { points: [{x, price}], baseline }
   const { points, baseline } = normalizeData(json, period, market);
@@ -393,7 +405,7 @@ function addHeader(widget, model) {
   timeText.font = Font.systemFont(10);
   timeText.textColor = new Color('#FFFFFF', 0.6);
 
-  header.addSpacer(8);
+  header.addSpacer(4);
 
   // 左側：週期標籤
   const periodText = Array.isArray(model) ? '[ALL]' : `[${model.period}]`;
@@ -401,11 +413,20 @@ function addHeader(widget, model) {
   periodLabel.font = Font.systemFont(10);
   periodLabel.textColor = new Color('#FFFFFF', 0.6);
 
+  // 隨機模式標籤 (僅非 'none' 模式)
+  if (model.randomMode && model.randomMode !== 'none') {
+    header.addSpacer(4);
+    const randomLabel = header.addText(`[${model.randomMode.toUpperCase()}]`);
+    randomLabel.font = Font.systemFont(10);
+    randomLabel.textColor = new Color('#FFFFFF', 0.6);
+  }
+
   // 中間間距：將右側元素推向右側
   header.addSpacer();
 
-  // 右側：股票代碼 + 價格 + 漲跌幅
-  const ticker = header.addText(model.symbol);
+  // 右側：股票名稱/代碼 + 價格 + 漲跌幅
+  const displayName = model.displayName || model.symbol;
+  const ticker = header.addText(displayName);
   ticker.font = Font.semiboldRoundedSystemFont(14);
   ticker.textColor = Color.white();
 
@@ -690,8 +711,10 @@ function drawAllLayers(ctx, points, model, baseY, bottomY, width, padL, padR) {
   if (points.length < 2) return;
   
   const { trendMode, baseline } = model;
-  const { up, down } = CONFIG.colors;
-  const { up: alphaUp, down: alphaDown } = CONFIG.colors.fillAlpha;
+  const colorUp = new Color(CONFIG.colors.up, 1.0);
+  const colorDown = new Color(CONFIG.colors.down, 1.0);
+  const fillUp = new Color(CONFIG.colors.up, CONFIG.colors.fillAlpha.up);
+  const fillDown = new Color(CONFIG.colors.down, CONFIG.colors.fillAlpha.down);
   
   // 填充區域
   if (trendMode === 'ABOVE' || trendMode === 'BELOW') {
@@ -706,9 +729,7 @@ function drawAllLayers(ctx, points, model, baseY, bottomY, width, padL, padR) {
     fillPath.addLine(new Point(points[0].x, bottomY));
     fillPath.closeSubpath();
     
-    const fillColor = trendMode === 'ABOVE' 
-      ? new Color(up, alphaUp)
-      : new Color(down, alphaDown);
+    const fillColor = trendMode === 'ABOVE' ? fillUp : fillDown;
     
     ctx.setFillColor(fillColor);
     ctx.addPath(fillPath);
@@ -725,9 +746,7 @@ function drawAllLayers(ctx, points, model, baseY, bottomY, width, padL, padR) {
       const isBelow = p1.price <= baseline && p2.price <= baseline;
       
       if (isAbove || isBelow) {
-        const fillColor = isAbove 
-          ? new Color(up, alphaUp)
-          : new Color(down, alphaDown);
+        const fillColor = isAbove ? fillUp : fillDown;
         
         const path = new Path();
         if (isAbove) {
@@ -762,14 +781,12 @@ function drawAllLayers(ctx, points, model, baseY, bottomY, width, padL, padR) {
     // 決定線段顏色
     let lineColor;
     if (trendMode === 'ABOVE') {
-      lineColor = new Color(up, 1.0);
+      lineColor = colorUp;
     } else if (trendMode === 'BELOW') {
-      lineColor = new Color(down, 1.0);
+      lineColor = colorDown;
     } else {
       const midPrice = (p1.price + p2.price) / 2;
-      lineColor = midPrice >= baseline 
-        ? new Color(up, 1.0)
-        : new Color(down, 1.0);
+      lineColor = midPrice >= baseline ? colorUp : colorDown;
     }
     
     const linePath = new Path();
@@ -788,9 +805,9 @@ function drawAllLayers(ctx, points, model, baseY, bottomY, width, padL, padR) {
     // 根據當前漲跌決定虛線顏色
     const lastPrice = points[points.length - 1].price;
     const dashColor = lastPrice > baseline 
-      ? new Color(up, 0.5)
+      ? new Color(CONFIG.colors.up, 0.5)
       : lastPrice < baseline 
-        ? new Color(down, 0.5)
+        ? new Color(CONFIG.colors.down, 0.5)
         : new Color('#FFFFFF', 0.5);
     
     ctx.setStrokeColor(dashColor);
@@ -836,7 +853,7 @@ function get1dPriceInfo(allPeriodModels) {
  * 仿照 Widget.js 的 tryFetchStock() 模式
  * @param {string} symbol - 股票/ETF 代碼
  * @param {string} market - 市場代碼 ('US' 或 'HK')
- * @returns {Promise<{counterId: string, type: string}>} 成功的 counterId 和類型
+ * @returns {Promise<{counterId: string, type: string, preFetchedData: Object}>}
  */
 async function tryBuildCounterId(symbol, market) {
   const attempts = [
@@ -856,11 +873,24 @@ async function tryBuildCounterId(symbol, market) {
       console.log(`[嘗試] ${i + 1}/${attempts.length} (${label}): ${counterId}`);
 
       // 嘗試獲取數據以驗證 counterId 是否有效
+      // 這份數據將被傳回並重用
       const testJson = await fetchData(counterId, '1d');
 
       if (testJson) {
         console.log(`[嘗試] 成功: ${counterId}`);
-        return { counterId, type };
+
+        // 港股獲取 stock_name，美股直接用 symbol
+        let displayName = symbol;
+        if (market === 'HK') {
+          try {
+            displayName = await fetchStockName(counterId);
+            console.log(`[名稱] ${symbol} → ${displayName}`);
+          } catch (nameError) {
+            console.warn(`[名稱] 獲取失敗，使用代碼: ${nameError.message}`);
+          }
+        }
+
+        return { counterId, type, displayName, preFetchedData: testJson };
       }
     } catch (error) {
       console.log(`[嘗試] 失敗 ${i + 1}/${attempts.length}: ${error.message}`);
@@ -872,12 +902,229 @@ async function tryBuildCounterId(symbol, market) {
 }
 
 /**
+ * 獲取股票名稱 (Detail API)
+ */
+async function fetchStockName(counterId) {
+  const url = `https://m-gl.lbkrs.com/api/forward/v3/quote/stock/detail?counter_id=${encodeURIComponent(counterId)}`;
+  const req = new Request(url);
+  req.timeoutInterval = 5;
+  const json = await req.loadJSON();
+  return json?.data?.stock_name || null;
+}
+
+/**
+ * 解析符號列表：支援 widgetParameter 或 CONFIG.symbol 的逗號分隔格式
+ * @param {string} str - 'NVDA,AAPL,0700' 或單一代碼
+ * @returns {string[]} 清理後的符號陣列
+ */
+function parseSymbolList(str) {
+  if (!str || typeof str !== 'string') return [];
+  return str.split(',')
+           .map(s => s.trim().toUpperCase())
+           .filter(s => s.length > 0 && s.length <= 10);
+}
+
+/**
  * 從 widget 參數取得股票/ETF 代碼（支援「代碼1,代碼2」格式，取第一個）
  */
 function getParam() {
   const param = (args?.widgetParameter || '').trim();
   if (!param) return null;
   return param.split(',')[0].trim().toUpperCase() || null;
+}
+
+/**
+ * 根據 RANDOM 配置選擇股票代碼（核心邏輯）
+ * @returns {Promise<string>} 選擇的股票代碼
+ */
+async function getRandomSymbol() {
+  try {
+    const param = args?.widgetParameter || CONFIG.symbol;
+    const defaultSymbol = parseSymbolList(param)[0] || CONFIG.symbol;
+    const mode = CONFIG.RANDOM;
+
+    console.log(`[隨機] 模式: ${mode}, 參數: ${param}`);
+
+    switch (mode) {
+      case 'none':
+        // 向後相容：取第一支
+        return parseSymbolList(param)[0] || CONFIG.symbol;
+
+      case 'cus':
+        // 自選隨機：從列表純隨機選一支
+        const cusList = parseSymbolList(param);
+        if (cusList.length === 0) {
+          console.warn('[隨機] 自選列表為空，fallback 到預設');
+          return CONFIG.symbol;
+        }
+        const cusSymbol = cusList[Math.floor(Math.random() * cusList.length)];
+        console.log(`[隨機] 自選選中: ${cusSymbol} (${cusList.length} 選項)`);
+        return cusSymbol;
+
+      case 'rank':
+        // 排行隨機：從前50純隨機選
+        console.log('[隨機] 排行模式 - 調用 fetchTopRankingSymbols');
+        const market = resolveMarketAuto();
+        const topSymbols = await fetchTopRankingSymbols(market);
+        if (topSymbols.length === 0) {
+          console.warn('[隨機] 排行無數據，fallback 到預設');
+          return defaultSymbol;
+        }
+        const rankSymbol = topSymbols[Math.floor(Math.random() * topSymbols.length)];
+        console.log(`[隨機] 排行選中: ${rankSymbol} (${topSymbols.length} 選項)`);
+        return rankSymbol;
+
+      default:
+        console.warn(`[隨機] 未知模式 ${mode}，使用 none`);
+        return defaultSymbol;
+    }
+  } catch (error) {
+    console.error(`[隨機] 選擇失敗: ${error.message}`);
+    return defaultSymbol; // 最終 fallback
+  }
+}
+
+/**
+ * 簡化版市場自動識別 (完整複製 Widget.js v2.6 邏輯)
+ */
+function resolveMarketAuto() {
+  const now = new Date();
+
+  // 紐約時間 (美股)
+  const ny = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const nyDay = ny.getDay();
+  const nyHour = ny.getHours();
+  const nyMin = ny.getMinutes();
+  const nyTime = nyHour * 60 + nyMin;
+
+  // 香港時間 (港股)
+  const hk = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Hong_Kong' }));
+  const hkDay = hk.getDay();
+  const hkHour = hk.getHours();
+  const hkMin = hk.getMinutes();
+  const hkTime = hkHour * 60 + hkMin;
+
+  // 交易時段檢查
+  const hkOpen = hkDay >= 1 && hkDay <= 5 && hkTime >= 9 * 60 + 30 && hkTime <= 16 * 60;
+  const usOpen = nyDay >= 1 && nyDay <= 5 && nyTime >= 9 * 60 + 30 && nyTime <= 16 * 60;
+
+  if (usOpen) return 'US';
+  if (hkOpen) return 'HK';
+
+  // 預設邏輯
+  if (hkDay === 0 || hkDay === 6) return 'US';
+
+  // 維持收市後~另一股開市前 1 小時為同一市場
+  if (hkDay >= 1 && hkDay <= 5) {
+    if (hkTime > 16 * 60 && nyTime < 8 * 60 + 30) return 'HK';  // 港股收市後
+    if (nyTime > 4 * 60 && hkTime < 8 * 60 + 30) return 'US';   // 美股開市前
+  }
+
+  return 'US';
+}
+
+/**
+ * 簡化版 RankingCache (1分鐘快取)
+ */
+class SparklineRankingCache {
+  constructor() {
+    this.fm = FileManager.local();
+    this.paths = {
+      US: this.fm.joinPath(this.fm.documentsDirectory(), 'sparkline_ranking_US.json'),
+      HK: this.fm.joinPath(this.fm.documentsDirectory(), 'sparkline_ranking_HK.json')
+    };
+    this.duration = 1; // 1分鐘
+  }
+
+  get(market) {
+    const path = this.paths[market];
+    if (!this.fm.fileExists(path)) return null;
+
+    try {
+      const cache = JSON.parse(this.fm.readString(path));
+      const age = (new Date() - new Date(cache.timestamp)) / 60000;
+      return age <= this.duration ? cache.data : null;
+    } catch (e) {
+      console.error(`[快取] 排行讀取失敗: ${e.message}`);
+      return null;
+    }
+  }
+
+  set(market, data) {
+    try {
+      const path = this.paths[market];
+      this.fm.writeString(path, JSON.stringify({
+        data,
+        timestamp: new Date()
+      }));
+    } catch (e) {
+      console.error(`[快取] 排行寫入失敗: ${e.message}`);
+    }
+  }
+}
+
+/**
+ * 獲取排行前N股票代碼 (簡化版 LbkrsClient)
+ * @param {string} market - 'US' | 'HK'
+ * @returns {Promise<string[]>} 前N股票代碼陣列
+ */
+async function fetchTopRankingSymbols(market) {
+  const cache = new SparklineRankingCache();
+  let symbols = cache.get(market);
+
+  if (symbols) {
+    console.log(`[排行] 快取命中: ${market} (${symbols.length} 支)`);
+    return symbols.slice(0, CONFIG.RANK_TOP_N);
+  }
+
+  console.log(`[排行] 請求 ${market} 排行榜...`);
+
+  try {
+    // 簡化版排行 API
+    const indicators = [
+      'last_done','chg','change','total_amount','total_balance','turnover_rate',
+      'amplitude','volume_rate','depth_rate','pb_ttm','market_cap',
+      'five_min_chg','five_day_chg','ten_day_chg','twenty_day_chg',
+      'this_year_chg','half_year_chg','industry'
+    ];
+
+    const url = `https://m-gl.lbkrs.com/api/forward/newmarket/revision/rank/pc/list?` +
+      `market=${market}&key=all&sort_indicator=total_balance&order=desc&` +
+      `offset=0&limit=${CONFIG.RANK_TOP_N}&` +
+      indicators.map(ind => `indicators[]=${encodeURIComponent(ind)}`).join('&');
+
+    const req = new Request(url);
+    req.timeoutInterval = 10;
+    const json = await req.loadJSON();
+
+    if (!json?.data?.list?.length) {
+      throw new Error('排行數據為空');
+    }
+
+    symbols = json.data.list
+      .slice(0, CONFIG.RANK_TOP_N)
+      .map(item => parseStockCode(item.counter_id))
+      .filter(code => code);
+
+    cache.set(market, symbols);
+    console.log(`[排行] 獲取成功: ${market} (${symbols.length}/${CONFIG.RANK_TOP_N})`);
+
+    return symbols;
+  } catch (error) {
+    console.error(`[排行] 獲取失敗 ${market}: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * 從 counter_id 解析股票代碼 (ST/US/NVDA → NVDA)
+ * @param {string} counterId - 'ST/US/NVDA' 或 'ETF/HK/0700'
+ * @returns {string} 股票代碼
+ */
+function parseStockCode(counterId) {
+  if (!counterId || typeof counterId !== 'string') return null;
+  const parts = counterId.split('/');
+  return parts.length === 3 ? parts[2] : null;
 }
 
 /**
