@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [2.9.0] - 2025-11-26 **MA 均線完整實作**
+
+### Added
+- **MA 配置系統** `CONFIG.MA_CONFIG`
+  - 三條均線週期：20/50/200 日
+  - 三角形視覺化參數：大小範圍 4-10px，縮放係數 0.5
+  - 專用配色：綠 (正乖離)、紅 (負乖離)、灰 (無數據)
+- **MA 欄位** 新增至所有欄位設定 (美股/港股/混合)
+- **MA 排名視覺化**
+  - 最高 MA 值：上方綠線標記
+  - 最低 MA 值：下方紅線標記
+  - 自動排序並映射排名
+- **MA 計算工具類** `MACalculator`
+  - `calculateMA()` - 移動平均計算
+  - `calculateDeviation()` - 乖離率計算
+- **K 線歷史 API** `LbkrsClient.getKlineHistory()`
+
+### Optimized
+- **MA 計算效能**：K 線數據優化至 201 天 (足夠 200MA)
+- **預先解析**：收盤價一次解析，避免重複計算
+- **動態寬度**：MA 欄位根據週期數量自動調整 (`DAYS.length * 12`)
+
+### Changed
+- 港股/混合模式：`tradeTurnover` 改為不顯示
+- 程式碼格式：移除多餘空白，統一風格
+
 ## [2.8.0] - 2025-11-18 **Sparkline 隨機股票顯示**
 
 ### Added

@@ -1,6 +1,6 @@
 // Widget.js
 // 盤中成交額排行 Widget - 支持美股/港股
-// 版本: v2.8.0
+// 版本: v2.9.0
 
 // ==================== 設定區 ====================
 const CONFIG = {
@@ -35,7 +35,23 @@ const CONFIG = {
     MARKET_URLS: {
         BASE: 'https://m-gl.lbkrs.com',
         RANKING_PATH: '/api/forward/newmarket/revision/rank/pc/list',
-        DETAIL_PATH: '/api/forward/v3/quote/stock/detail'
+        DETAIL_PATH: '/api/forward/v3/quote/stock/detail',
+        KLINE_PATH: '/api/forward/v3/quote/kline'
+    },
+
+    // MA (均線) 配置
+    MA_CONFIG: {
+        DAYS: [20, 50, 200],
+        TRIANGLE: {
+            MIN_SIZE: 4,
+            MAX_SIZE: 10,
+            SCALING_FACTOR: 0.5
+        },
+        COLORS: {
+            GAIN: '#00C46B',
+            LOSS: '#FF3B3B',
+            NEUTRAL: '#CCCCCC'
+        }
     },
 
     // K 線配置
@@ -59,6 +75,7 @@ const CONFIG = {
         { key: 'currentPrice', header: '價格', width: 50, visible: true },
         { key: 'tradeTurnover', header: '成交額', width: 45, visible: true },
         { key: 'volumeRatio', header: '量比', width: 30, visible: true },
+        { key: 'ma', header: 'MA', width: 36, visible: true },
     ],
 
     // 港股欄位設定
@@ -69,8 +86,9 @@ const CONFIG = {
         { key: 'kline', header: '', width: 8, visible: true },
         { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
         { key: 'currentPrice', header: '價格', width: 50, visible: true },
-        { key: 'tradeTurnover', header: '成交額', width: 45, visible: true },
+        { key: 'tradeTurnover', header: '成交額', width: 45, visible: false },
         { key: 'volumeRatio', header: '量比', width: 30, visible: true },
+        { key: 'ma', header: 'MA', width: 36, visible: true },
     ],
 
     // 混合市場自選股票欄位設定
@@ -81,8 +99,9 @@ const CONFIG = {
         { key: 'kline', header: '', width: 8, visible: true },
         { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
         { key: 'currentPrice', header: '價格', width: 50, visible: true },
-        { key: 'tradeTurnover', header: '成交額', width: 45, visible: true },
+        { key: 'tradeTurnover', header: '成交額', width: 45, visible: false },
         { key: 'volumeRatio', header: '量比', width: 30, visible: true },
+        { key: 'ma', header: 'MA', width: 36, visible: true },
     ],
 
     // 色彩系統
@@ -130,7 +149,7 @@ const CONFIG = {
         HEADER_PADDING: { top: 4, left: 12, bottom: 4, right: 12 },
         ROW_PADDING: { top: 0, left: 12, bottom: 0, right: 12 },
         PROGRESS_BAR_HEIGHT: 1,
-        
+
         // 新增：成交額線條配置
         TURNOVER_BAR: {
             MIN_WIDTH: 1,          // 最小線條寬度
@@ -226,7 +245,7 @@ class StockDataMapper {
      */
     static fromRankingAPI(lbkrsItem) {
         const indicators = lbkrsItem.indicators;
-        
+
         if (!indicators || indicators.length < 18) {
             throw new Error(`Lbkrs 數據不完整: 缺少必要的指標數組`);
         }
@@ -274,24 +293,24 @@ class StockDataMapper {
 
         const parsed = CounterIdHelper.parse(counterId);
         const currentPrice = parseFloat(detailData.last_done) || 0;
-        
+
         // 計算漲跌幅
         const changePercent = this.#calculateChangePercent(detailData, currentPrice);
         const changeRatio = `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%`;
 
         // 提取成交額（嘗試多個字段）
-        const tradeTurnover = detailData.balance || 
-                             detailData.total_balance || 
-                             detailData.amount || 
-                             '0';
+        const tradeTurnover = detailData.balance ||
+            detailData.total_balance ||
+            detailData.amount ||
+            '0';
 
         const volumeRatio = parseFloat(detailData.volume_rate) || 0;
 
         // 處理產業分類
         const instrumentType = parsed.instrumentType;
         const industry = this.#extractIndustry(
-            detailData.industry_name, 
-            instrumentType, 
+            detailData.industry_name,
+            instrumentType,
             detailData.stock_name
         );
 
@@ -341,7 +360,7 @@ class StockDataMapper {
         const open = parseFloat(detailData.open) || null;
         const high = parseFloat(detailData.high) || null;
         const low = parseFloat(detailData.low) || null;
-        
+
         // 驗證數據完整性
         if (!open || !high || !low || !currentPrice) {
             return null;
@@ -423,9 +442,9 @@ class KlineDataProcessor {
             const market = CounterIdHelper.identifyMarket(stock.stockCode);
             const instrumentType = stock.instrumentType === 4 ? 'ETF' : 'ST';
             const counterId = CounterIdHelper.build(stock.stockCode, market, instrumentType);
-            
+
             const data = await fetcher.fetchLbkrsDetailData(counterId, `kline_${stock.stockCode}`);
-            
+
             if (data?.data) {
                 const klineData = this.rebuild(data.data, stock.currentPrice);
                 if (klineData) {
@@ -460,7 +479,7 @@ class RankingCache {
         try {
             const cache = JSON.parse(this.fm.readString(path));
             const age = (new Date() - new Date(cache.timestamp)) / 60000;
-            
+
             if (age > this.duration) return null;
             return cache;
         } catch (e) {
@@ -494,12 +513,12 @@ class WatchlistCache {
         try {
             const cache = JSON.parse(this.fm.readString(this.path));
             const item = cache[stockCode];
-            
+
             if (!item) return null;
-            
+
             const age = (new Date() - new Date(item.timestamp)) / 60000;
             if (age > this.duration) return null;
-            
+
             return item.value;
         } catch (e) {
             console.error(`自選快取讀取失敗: ${e.message}`);
@@ -513,12 +532,12 @@ class WatchlistCache {
             if (this.fm.fileExists(this.path)) {
                 cache = JSON.parse(this.fm.readString(this.path));
             }
-            
+
             cache[stockCode] = {
                 value: data,
                 timestamp: new Date()
             };
-            
+
             this.fm.writeString(this.path, JSON.stringify(cache, null, 2));
         } catch (e) {
             console.error(`自選快取寫入失敗: ${e.message}`);
@@ -551,12 +570,12 @@ class KlineCache {
         try {
             const cache = JSON.parse(this.fm.readString(this.path));
             const item = cache[stockCode];
-            
+
             if (!item) return null;
-            
+
             const age = (new Date() - new Date(item.timestamp)) / 60000;
             if (age > this.duration) return null;
-            
+
             return item.value;
         } catch (e) {
             console.error(`K線快取讀取失敗: ${e.message}`);
@@ -570,12 +589,12 @@ class KlineCache {
             if (this.fm.fileExists(this.path)) {
                 cache = JSON.parse(this.fm.readString(this.path));
             }
-            
+
             cache[stockCode] = {
                 value: klineData,
                 timestamp: new Date()
             };
-            
+
             this.fm.writeString(this.path, JSON.stringify(cache, null, 2));
         } catch (e) {
             console.error(`K線快取寫入失敗: ${e.message}`);
@@ -803,6 +822,34 @@ class LbkrsClient {
         const detailData = await this.getDetailByCounterId(counterId, context);
         return { code: 0, data: detailData };
     }
+
+    /**
+     * 獲取 K 線歷史數據
+     * @param {string} counterId 
+     * @param {number} lineNum 
+     * @param {number} lineType 
+     */
+    async getKlineHistory(counterId, lineNum = 250, lineType = 1000) {
+        const query = {
+            counter_id: counterId,
+            line_num: lineNum,
+            line_type: lineType
+        };
+
+        const url = this.buildUrl(this.config.MARKET_URLS.KLINE_PATH.replace(this.base, ''), query);
+        // 注意：buildUrl 會自動加上 base，這裡 KLINE_PATH 如果是相對路徑則不需要 replace，
+        // 但 CONFIG 中定義的是 '/api/...', buildUrl 會拼在 base 後面。
+        // 修正：buildUrl 的 path 參數應該是相對路徑。
+        // 檢查 CONFIG: KLINE_PATH: '/api/forward/v3/quote/kline' -> 正確
+
+        const data = await this.fetcher.fetchJson(url, `kline_history_${counterId}`);
+
+        if (!data?.data?.klines) {
+            throw new Error(`K線歷史數據格式錯誤 (${counterId})`);
+        }
+
+        return data.data.klines;
+    }
 }
 
 // ==================== 核心類別：色彩計算器 ====================
@@ -815,7 +862,7 @@ class ColorCalculator {
     getChangeRatioColor(ratio) {
         const key = `change_${ratio.toFixed(2)}`;
         if (this.cache.has(key)) return this.cache.get(key);
-        
+
         const color = this.calculateChangeRatioColor(ratio);
         this.cache.set(key, color);
         return color;
@@ -842,7 +889,7 @@ class ColorCalculator {
     getVolumeRatioColor(ratio) {
         const key = `volume_${ratio.toFixed(2)}`;
         if (this.cache.has(key)) return this.cache.get(key);
-        
+
         const color = this.calculateVolumeRatioColor(ratio);
         this.cache.set(key, color);
         return color;
@@ -852,7 +899,7 @@ class ColorCalculator {
         const t = this.config.VOLUME_RATIO_THRESHOLDS;
         const c = this.config.VOLUME_RATIO_COLORS;
         const capped = Math.min(ratio, t.MAX_CAP);
-        
+
         if (capped < t.COLDEST) return new Color(c.coldest);
         if (capped < t.COLD) return this.interpolate(c.coldest, c.cold, (capped - 0) / (t.COLD - 0));
         if (capped < t.WARM) return this.interpolate(c.cold, c.warm, (capped - t.COLD) / (t.WARM - t.COLD));
@@ -880,6 +927,35 @@ class ColorCalculator {
 
     rgbToHex(r, g, b) {
         return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+    }
+}
+
+// ==================== 核心類別：MA 計算器 ====================
+class MACalculator {
+    /**
+     * 計算移動平均線
+     * @param {Array<number>} prices - 收盤價數組
+     * @param {number} days - 天數
+     * @returns {number|null} MA值
+     */
+    static calculateMA(prices, days) {
+        if (!prices || prices.length < days) return null;
+
+        // 取最近 days 天的數據
+        const targetPrices = prices.slice(-days);
+        const sum = targetPrices.reduce((acc, p) => acc + p, 0);
+        return sum / days;
+    }
+
+    /**
+     * 計算乖離率
+     * @param {number} currentPrice 
+     * @param {number} maValue 
+     * @returns {number} 乖離率百分比
+     */
+    static calculateDeviation(currentPrice, maValue) {
+        if (!maValue) return null;
+        return ((currentPrice - maValue) / maValue) * 100;
     }
 }
 
@@ -924,12 +1000,12 @@ function resolveMarketAuto() {
  */
 function resolveDisplayMode() {
     const watchlist = CONFIG.CUSTOM_WATCHLIST;
-    
+
     if (watchlist && watchlist.length > 0) {
         console.log(`[模式] 自選模式 (${watchlist.length} 支股票)`);
         return { mode: 'watchlist', market: 'AUTO' };
     }
-    
+
     console.log(`[模式] 排行榜模式`);
     const market = CONFIG.MARKET === 'AUTO' ? resolveMarketAuto() : CONFIG.MARKET;
     return { mode: 'ranking', market };
@@ -950,11 +1026,11 @@ async function fetchRanking(client, market) {
 async function fetchWatchlist(client, caches) {
     const watchlist = CONFIG.CUSTOM_WATCHLIST;
     console.log(`[自選] 開始獲取 ${watchlist.length} 支股票`);
-    
+
     const concurrency = Math.min(watchlist.length + 5, 30);
     const results = [];
     const errors = [];
-    
+
     const batchSize = Math.min(concurrency, 10);
     for (let i = 0; i < watchlist.length; i += batchSize) {
         const batch = watchlist.slice(i, i + batchSize);
@@ -966,37 +1042,37 @@ async function fetchWatchlist(client, caches) {
                     console.log(`[自選] 快取命中: ${stockCode}`);
                     return cached;
                 }
-                
+
                 // 識別市場
                 const market = CounterIdHelper.identifyMarket(stockCode);
-                
+
                 // 多輪嘗試獲取數據
                 const result = await tryFetchStock(stockCode, market, client);
-                
+
                 // 映射為標準格式
                 const mappedData = StockDataMapper.fromDetailAPI(result.data, result.counterId);
-                
+
                 // 寫入快取
                 caches.watchlist.set(stockCode, mappedData);
-                
+
                 console.log(`[自選] 成功: ${stockCode}`);
                 return mappedData;
-                
+
             } catch (error) {
                 console.error(`[自選] 失敗: ${stockCode} - ${error.message}`);
                 errors.push({ stockCode, error: error.message });
                 return null;
             }
         });
-        
+
         const batchResults = await Promise.all(batchPromises);
         results.push(...batchResults.filter(r => r !== null));
-        
+
         if (i + batchSize < watchlist.length) {
             await fetcher.delay(100);
         }
     }
-    
+
     console.log(`[自選] 完成: ${results.length} 成功, ${errors.length} 失敗`);
     return results;
 }
@@ -1009,21 +1085,21 @@ async function tryFetchStock(stockCode, market, client) {
         { type: 'ST', label: '股票' },
         { type: 'ETF', label: 'ETF' }
     ];
-    
+
     if (market === 'US') {
         attempts.push({ type: 'ST', label: '股票(備用)', format: true });
     }
-    
+
     let lastError = null;
-    
+
     for (let i = 0; i < attempts.length; i++) {
         const { type, label } = attempts[i];
         try {
             const counterId = CounterIdHelper.build(stockCode, market, type);
             console.log(`[重試] ${i + 1}/${attempts.length} (${label}): ${counterId}`);
-            
+
             const detail = await client.getDetailByCounterId(counterId, `stock_${stockCode}`);
-            
+
             if (detail) {
                 console.log(`[重試] 成功: ${counterId}`);
                 return { data: detail, counterId };
@@ -1033,7 +1109,7 @@ async function tryFetchStock(stockCode, market, client) {
             lastError = error;
         }
     }
-    
+
     throw new Error(`所有嘗試失敗: ${lastError?.message || '未知錯誤'}`);
 }
 
@@ -1059,18 +1135,56 @@ function filterData(stockList) {
 async function enrichData(data, client, caches, market, mode) {
     const visibleColumns = getColumns(market, mode).filter(c => c.visible);
     const needsKline = visibleColumns.some(col => col.key === 'kline');
-    
+
     if (!needsKline) {
         console.log(`[優化] 不需要 K線數據`);
         return data;
     }
-    
+
     console.log(`[K線] 開始獲取 ${data.length} 支股票的 K線數據`);
-    
-    return Promise.all(data.map(async (stock) => ({
-        ...stock,
-        klineData: await KlineDataProcessor.fetch(stock, client, caches)
-    })));
+
+    return Promise.all(data.map(async (stock) => {
+        // 1. 獲取 K線數據 (用於 Sparkline)
+        const klineData = await KlineDataProcessor.fetch(stock, client, caches);
+
+        // 2. 處理 MA 數據 (如果需要)
+        let maData = null;
+        const needsMA = visibleColumns.some(col => col.key === 'ma');
+
+        if (needsMA) {
+            try {
+                // 直接獲取歷史數據 (201天足夠計算 200MA)
+                const market = CounterIdHelper.identifyMarket(stock.stockCode);
+                const instrumentType = stock.instrumentType === 4 ? 'ETF' : 'ST';
+                const counterId = CounterIdHelper.build(stock.stockCode, market, instrumentType);
+
+                const history = await client.getKlineHistory(counterId, 201);
+
+                if (history && history.length > 0) {
+                    // 預先解析收盤價，避免重複解析
+                    const prices = history.map(k => parseFloat(k.close));
+
+                    maData = {};
+                    CONFIG.MA_CONFIG.DAYS.forEach(day => {
+                        const ma = MACalculator.calculateMA(prices, day);
+                        const deviation = MACalculator.calculateDeviation(stock.currentPrice, ma);
+                        maData[`ma${day}`] = {
+                            value: ma,
+                            deviation: deviation
+                        };
+                    });
+                }
+            } catch (e) {
+                console.error(`[MA] ${stock.stockCode} 計算失敗: ${e.message}`);
+            }
+        }
+
+        return {
+            ...stock,
+            klineData,
+            maData
+        };
+    }));
 }
 
 // ==================== Widget 建構引擎 ====================
@@ -1078,10 +1192,23 @@ async function enrichData(data, client, caches, market, mode) {
  * 獲取當前欄位設定
  */
 function getColumns(market, mode) {
+    let columns;
     if (mode === 'watchlist') {
-        return CONFIG.COLUMN_SETTINGS_MIXED;
+        columns = CONFIG.COLUMN_SETTINGS_MIXED;
+    } else {
+        columns = market === 'HK' ? CONFIG.COLUMN_SETTINGS_HK : CONFIG.COLUMN_SETTINGS_US;
     }
-    return market === 'HK' ? CONFIG.COLUMN_SETTINGS_HK : CONFIG.COLUMN_SETTINGS_US;
+
+    // 動態計算 MA 欄位寬度 (每增加一天 +12px)
+    return columns.map(col => {
+        if (col.key === 'ma') {
+            return {
+                ...col,
+                width: CONFIG.MA_CONFIG.DAYS.length * 12
+            };
+        }
+        return col;
+    });
 }
 
 /**
@@ -1123,7 +1250,7 @@ function createHeaderRow(widget, updateTime, columns) {
     columns.forEach(col => {
         const colStack = headerRow.addStack();
         colStack.size = new Size(col.width, 0);
-        
+
         const headerText = col.key === 'industry' ? timeString : col.header;
         const colHeader = colStack.addText(headerText);
         colHeader.font = Font.boldSystemFont(CONFIG.FONT_SIZE);
@@ -1166,6 +1293,11 @@ function addColumnCell(rowStack, col, stock, rowColor, colorCalc, mode) {
         return;
     }
 
+    if (col.key === 'ma') {
+        drawMATriangle(colStack, stock.maData);
+        return;
+    }
+
     const value = formatValue(col.key, stock, mode);
     addTextCell(colStack, value, col.key, stock, rowColor, colorCalc);
 }
@@ -1176,28 +1308,28 @@ function addColumnCell(rowStack, col, stock, rowColor, colorCalc, mode) {
 function formatValue(key, stock, mode) {
     switch (key) {
         case 'stockCode':
-            return CounterIdHelper.formatStockCode(stock.stockCode, 
+            return CounterIdHelper.formatStockCode(stock.stockCode,
                 CounterIdHelper.identifyMarket(stock.stockCode));
-        
+
         case 'stockName':
             return stock.stockName || '--';
-        
+
         case 'stockDisplay':
             if (mode === 'watchlist') {
                 const isHK = /^\d+$/.test(stock.stockCode);
                 return isHK ? (stock.stockName || stock.stockCode) : stock.stockCode;
             }
             return stock.stockCode;
-        
+
         case 'currentPrice':
             return stock.currentPrice.toFixed(2);
-        
+
         case 'tradeTurnover':
             return formatTurnover(stock.tradeTurnover);
-        
+
         case 'volumeRatio':
             return stock.volumeRatio.toFixed(2);
-        
+
         default:
             return String(stock[key] || '--');
     }
@@ -1226,19 +1358,19 @@ function addTextCell(colStack, value, key, stock, rowColor, colorCalc) {
 function addProgressBar(rowContainer, stock, maxTurnover, totalBarWidth, rowColor) {
     // 計算成交額比例
     const currentTurnover = parseTurnoverToNumber(stock.tradeTurnover);
-    
+
     // 處理無效數據
     if (maxTurnover <= 0 || currentTurnover <= 0) {
         addMinimalBar(rowContainer, totalBarWidth);
         return;
     }
-    
+
     // 計算比例 (0-1之間)
     const ratio = Math.min(currentTurnover / maxTurnover, 1);
-    
+
     // 計算線條寬度 (使用新配置)
     const barWidth = Math.max(totalBarWidth * ratio, CONFIG.UI.TURNOVER_BAR.MIN_WIDTH);
-    
+
     // 建立線條容器
     const barContainer = rowContainer.addStack();
     barContainer.size = new Size(totalBarWidth, CONFIG.UI.PROGRESS_BAR_HEIGHT);
@@ -1250,7 +1382,7 @@ function addProgressBar(rowContainer, stock, maxTurnover, totalBarWidth, rowColo
         progressBar.size = new Size(barWidth, CONFIG.UI.PROGRESS_BAR_HEIGHT);
         progressBar.backgroundColor = rowColor;
         progressBar.cornerRadius = 0;
-        
+
         // 添加右側間距
         barContainer.addSpacer();
     }
@@ -1265,7 +1397,7 @@ function addMinimalBar(rowContainer, totalBarWidth) {
     const barContainer = rowContainer.addStack();
     barContainer.size = new Size(totalBarWidth, CONFIG.UI.PROGRESS_BAR_HEIGHT);
     barContainer.backgroundColor = new Color("#888888", CONFIG.UI.TURNOVER_BAR.BACKGROUND_OPACITY);
-    
+
     const minimalBar = barContainer.addStack();
     minimalBar.size = new Size(2, CONFIG.UI.PROGRESS_BAR_HEIGHT);
     minimalBar.backgroundColor = new Color("#CCCCCC", CONFIG.UI.TURNOVER_BAR.MINIMAL_BAR_OPACITY);
@@ -1280,10 +1412,10 @@ function drawKline(colStack, klineData, config) {
         colStack.addSpacer();
         return;
     }
-    
+
     const { open, high, low, close } = klineData;
     const { WIDTH, HEIGHT, SHADOW_WIDTH, GAIN_COLOR, LOSS_COLOR, NEUTRAL_COLOR } = config;
-    
+
     // 決定顏色
     let colorHex;
     if (close > open) {
@@ -1327,7 +1459,7 @@ function drawKline(colStack, klineData, config) {
     // 確保實體至少有 1px 高度以便可見
     const bodyHeight = Math.max(Math.abs(yOpen - yClose), 1);
     const bodyRect = new Rect(0, bodyTop, WIDTH, bodyHeight);
-    
+
     ctx.setFillColor(color);
     ctx.fillRect(bodyRect);
 
@@ -1339,23 +1471,156 @@ function drawKline(colStack, klineData, config) {
 }
 
 /**
+ * 繪製 MA 乖離率三角形
+ * @param {WidgetStack} colStack 
+ * @param {Object} maData - { ma20, ma50, ma200 } 每個包含 { deviation, trend }
+ */
+function drawMATriangle(colStack, maData) {
+    if (!maData) {
+        const t = colStack.addText('-');
+        t.font = Font.systemFont(10);
+        t.textColor = new Color('#666666');
+        return;
+    }
+
+    const { TRIANGLE, COLORS, DAYS } = CONFIG.MA_CONFIG;
+    const width = DAYS.length * 12; // 動態寬度
+    const height = 14; // 行高
+
+    const ctx = new DrawContext();
+    ctx.size = new Size(width, height); // 水平排列，高度為單行
+    ctx.opaque = false;
+    ctx.respectScreenScale = true;
+
+    const itemWidth = 12; // 固定每個項目寬度
+
+    // 1. 收集有效的 MA 數據並排序以確定排名
+    const validMAs = [];
+    DAYS.forEach(day => {
+        const key = `ma${day}`;
+        const data = maData[key];
+        if (data && data.value !== null && data.value !== undefined) {
+            validMAs.push({ day, value: data.value });
+        }
+    });
+
+    // 按數值降序排序 (數值越大排名越前)
+    validMAs.sort((a, b) => b.value - a.value);
+
+    // 建立排名映射: day -> rank (0-indexed, 0 is highest)
+    const rankMap = new Map();
+    validMAs.forEach((item, index) => {
+        rankMap.set(item.day, index);
+    });
+
+    const totalRanks = validMAs.length;
+    const blockHeight = totalRanks > 0 ? height / totalRanks : 0;
+
+    DAYS.forEach((day, index) => {
+        const key = `ma${day}`;
+        const data = maData[key];
+        // 計算中心座標 (水平排列)
+        const centerX = index * itemWidth + itemWidth / 2;
+        const centerY = height / 2;
+
+        // 繪製排名線條 (如果有排名且數量大於1)
+        if (totalRanks > 1 && rankMap.has(day)) {
+            const rank = rankMap.get(day);
+            const lineWidth = itemWidth; // 左右留白
+            const lineX = index * itemWidth;
+
+            // 最高 MA (Rank 0): 上方綠線
+            if (rank === 0) {
+                const path = new Path();
+                path.move(new Point(lineX, 1));
+                path.addLine(new Point(lineX + lineWidth, 1));
+                ctx.setStrokeColor(new Color(COLORS.GAIN));
+                ctx.setLineWidth(1);
+                ctx.addPath(path);
+                ctx.strokePath();
+            }
+
+            // 最低 MA (Rank N-1): 下方紅線
+            if (rank === totalRanks - 1) {
+                const path = new Path();
+                path.move(new Point(lineX, height - 1));
+                path.addLine(new Point(lineX + lineWidth, height - 1));
+                ctx.setStrokeColor(new Color(COLORS.LOSS));
+                ctx.setLineWidth(1);
+                ctx.addPath(path);
+                ctx.strokePath();
+            }
+        }
+
+        if (!data || data.deviation === null) {
+            // 繪製橫線表示無數據
+            const path = new Path();
+            path.move(new Point(centerX - 2, centerY));
+            path.addLine(new Point(centerX + 2, centerY));
+            ctx.setStrokeColor(new Color('#666666'));
+            ctx.setLineWidth(1);
+            ctx.addPath(path);
+            ctx.strokePath();
+            return;
+        }
+
+        // 計算三角形大小 (線性映射)
+        const absDev = Math.abs(data.deviation);
+        const size = Math.min(
+            Math.max(absDev * TRIANGLE.SCALING_FACTOR + TRIANGLE.MIN_SIZE, TRIANGLE.MIN_SIZE),
+            TRIANGLE.MAX_SIZE
+        );
+
+        // 決定顏色和方向
+        const isUp = data.deviation > 0;
+        const color = isUp ? new Color(COLORS.GAIN) : new Color(COLORS.LOSS);
+
+        // 繪製三角形
+        const halfSize = size / 2;
+        const path = new Path();
+
+        if (isUp) {
+            // 向上三角形
+            path.move(new Point(centerX, centerY - halfSize));
+            path.addLine(new Point(centerX - halfSize, centerY + halfSize));
+            path.addLine(new Point(centerX + halfSize, centerY + halfSize));
+        } else {
+            // 向下三角形
+            path.move(new Point(centerX - halfSize, centerY - halfSize));
+            path.addLine(new Point(centerX + halfSize, centerY - halfSize));
+            path.addLine(new Point(centerX, centerY + halfSize));
+        }
+        path.closeSubpath();
+
+        ctx.setFillColor(color);
+        ctx.addPath(path);
+        ctx.fillPath();
+    });
+
+    const img = ctx.getImage();
+    const imgWidget = colStack.addImage(img);
+    imgWidget.imageSize = new Size(width, height); // 縮放以適應
+    imgWidget.centerAlignImage();
+}
+
+/**
  * 建立錯誤 Widget
  */
 function createErrorWidget(errorMessage) {
     const widget = new ListWidget();
     widget.backgroundColor = new Color('#5A0000');
     widget.setPadding(12, 12, 12, 12);
-    
+
     const title = widget.addText('⚠ Widget 錯誤');
     title.font = Font.boldSystemFont(14);
     title.textColor = Color.white();
-    
+
     widget.addSpacer(8);
-    
+
     const text = widget.addText(errorMessage);
     text.font = Font.systemFont(11);
     text.textColor = new Color('#FFDDDD');
-    
+
     return widget;
 }
 
@@ -1406,11 +1671,11 @@ function saveDebugFile(filename, content) {
 async function main() {
     const startTime = new Date();
     console.log(`=== 程式開始: ${startTime.toLocaleString()} ===`);
-    
+
     try {
         // 1. 模式決策
         const { mode, market } = resolveDisplayMode();
-        
+
         // 2. 初始化組件
         const client = new LbkrsClient(CONFIG);
         const colorCalc = new ColorCalculator(CONFIG);
@@ -1433,7 +1698,7 @@ async function main() {
         } else {
             const resolvedMarket = market === 'AUTO' ? resolveMarketAuto() : market;
             displayMarket = resolvedMarket;
-            
+
             let cachedData = caches.ranking.get(resolvedMarket);
             if (!cachedData?.data?.length) {
                 const rawData = await fetchRanking(client, resolvedMarket);
@@ -1477,14 +1742,14 @@ async function main() {
         } else {
             widget.presentLarge();
         }
-        
+
         // 9. 統計信息
         const endTime = new Date();
         const totalTime = endTime - startTime;
         console.log(`=== 執行完成 ===`);
         console.log(`模式: ${mode}, 市場: ${displayMarket}`);
         console.log(`股票數: ${enrichedData.length}, 總耗時: ${totalTime}ms`);
-        
+
     } catch (error) {
         console.error(`[錯誤] ${error.message}`);
         const errorWidget = createErrorWidget(error.message);

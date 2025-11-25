@@ -1,8 +1,8 @@
-# iOS Scriptable 股票 Widget **v2.8.0** 規格文件
+# iOS Scriptable 股票 Widget **v2.9.0** 規格文件
 
-**版本**: 2.8.0-RandomSparkline  
+**版本**: 2.9.0-MA-Complete  
 **平台**: iOS Scriptable v1.7+  
-**發布日期**: 2025-11-19  
+**發布日期**: 2025-11-26  
 **GitHub**: [https://github.com/hin88188/ios-scriptable-stock-widget/](https://github.com/hin88188/ios-scriptable-stock-widget/)
 
 ---
@@ -11,7 +11,8 @@
 
 | 版本 | 日期 | 主要特色 | 文件同步 |
 |------|------|----------|----------|
-| **2.8.0** | 2025-11-19 | **分時走勢隨機模式** (Rank/Cus) | ✅ |
+| **2.9.0** | 2025-11-26 | **MA 均線完整實作** (配置/計算/視覺化/排名) | ✅ |
+| 2.8.0 | 2025-11-19 | 分時走勢隨機模式 (Rank/Cus) | ✅ |
 | 2.7.0 | 2025-11-16 | 分時走勢圖 Widget + 多週期 | ✅ |
 | 2.6.0 | 2025-11-08 | `LbkrsClient` API 抽象 | ✅ |
 | 2.5.0 | 2025-11-06 | 成交額線條視覺化 | ✅ |
@@ -37,7 +38,7 @@ CounterIdHelper → StockDataMapper → KlineDataProcessor
 
 ---
 
-## 🏗️ 核心組件（v2.8.0）
+## 🏗️ 核心組件（v2.9.0）
 
 ### **1. 隨機選擇引擎 (Random Selection Engine)**
 位於 `MiniTimesharesSparklineWidget.js`，負責決定顯示的股票。
@@ -49,18 +50,39 @@ CounterIdHelper → StockDataMapper → KlineDataProcessor
   - 純隨機選取一支。
   - 具備 1 分鐘快取 (`sparkline_ranking_XX.json`)。
 
-### **2. API 抽象層** `LbkrsClient`
+### **2. MA 均線系統** `MACalculator` (v2.9.0 新增)
+```javascript
+class MACalculator {
+  calculateMA(prices, days)        // 計算移動平均
+  calculateDeviation(price, ma)    // 計算乖離率
+}
+
+// MA 配置
+CONFIG.MA_CONFIG = {
+  DAYS: [20, 50, 200],              // 三條均線週期
+  TRIANGLE: { MIN_SIZE: 4, MAX_SIZE: 10, SCALING_FACTOR: 0.5 },
+  COLORS: { GAIN: '#00C46B', LOSS: '#FF3B3B' }
+}
+```
+
+**視覺化特色**:
+- 🔺 乖離率三角形：大小反映偏離程度
+- 📊 動態欄位寬度：`DAYS.length * 12` 像素
+- 🏆 排名標記：最高 MA 上方綠線，最低 MA 下方紅線
+
+### **3. API 抽象層** `LbkrsClient`
 ```javascript
 class LbkrsClient {
   // 集中管理所有 Lbkrs endpoint
   BASE: 'https://m-gl.lbkrs.com'
   getRankingList(market: 'US'|'HK')
   getDetailByCounterId(counterId)
+  getKlineHistory(counterId, lineNum=201)  // v2.9.0 新增
   getTimeshares(counterId, period: '1d'|'5d')
 }
 ```
 
-### **3. 專業快取系統**
+### **4. 專業快取系統**
 | 快取類 | 檔案 | 時效 | 用途 |
 |--------|------|------|------|
 | `RankingCache` | `lbkrs_ranking_US.json` | 1分鐘 | Large Widget 排行 |
@@ -79,6 +101,13 @@ const CONFIG = {
   CUSTOM_WATCHLIST: ['NVDA','0700'], // 自選股票
   MAX_ITEMS: 21,                     // Large 最大高度
   DEBUG_MODE: false,
+  
+  // v2.9.0 MA 均線配置
+  MA_CONFIG: {
+    DAYS: [20, 50, 200],             // 均線週期
+    TRIANGLE: { MIN_SIZE: 4, MAX_SIZE: 10 },
+    COLORS: { GAIN: '#00C46B', LOSS: '#FF3B3B' }
+  },
   // ... 完整配置見原始碼
 }
 ```
@@ -128,18 +157,19 @@ const CONFIG = {
 
 ---
 
-## 🧪 效能基準（v2.8.0）
+## 🧪 效能基準（v2.9.0）
 
-| 指標 | v2.7.0 | v2.8.0 | 備註 |
+| 指標 | v2.8.0 | v2.9.0 | 備註 |
 |------|--------|--------|------|
-| **Large Widget** | <3.2s | <3.2s | 無變更 |
-| **Medium (固定)** | <2.5s | <2.5s | `RANDOM: 'none'` |
-| **Medium (Rank)** | - | <3.5s | 首次需抓取排行 API |
-| **All Periods** | <3s | <3s | 並行請求 |
-| **快取命中** | <0.4s | <0.4s | 包含 Sparkline Ranking |
+| **Large Widget** | <3.2s | <3.5s | +MA 計算 (~0.3s) |
+| **Medium (固定)** | <2.5s | <2.5s | 無變更 |
+| **Medium (Rank)** | <3.5s | <3.5s | 無變更 |
+| **All Periods** | <3s | <3s | 無變更 |
+| **快取命中** | <0.4s | <0.5s | +MA 計算 |
+| **K線數據量** | 250天 | 201天 | 優化 -20% |
 
 ---
 
-**文件版本**: v2.8.0-RandomSparkline  
-**最後更新**: 2025-11-19  
+**文件版本**: v2.9.0-MA-Complete  
+**最後更新**: 2025-11-26  
 **狀態**: ✅ 與原始碼 **100% 同步**
