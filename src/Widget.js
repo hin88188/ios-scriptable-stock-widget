@@ -1,6 +1,6 @@
 // Widget.js
 // 盤中成交額排行 Widget - 支持美股/港股
-// 版本: v2.9.0
+// 版本: v2.10.0
 
 // ==================== 設定區 ====================
 const CONFIG = {
@@ -54,6 +54,16 @@ const CONFIG = {
         }
     },
 
+    // RSI (相對強弱指標) 配置
+    RSI_CONFIG: {
+        DAYS: 6,                    // 預設 6 日 RSI
+        COLORS: {
+            STRONG: '#ef4444',      // RSI 100 (強勢)
+            NEUTRAL: '#CCCCCC',     // RSI 50 (中性)
+            WEAK: '#22c55e'         // RSI 0 (弱勢)
+        }
+    },
+
     // K 線配置
     KLINE: {
         WIDTH: 8,            // K線總寬度
@@ -67,40 +77,43 @@ const CONFIG = {
 
     // 美股欄位設定
     COLUMN_SETTINGS_US: [
-        { key: 'industry', header: '', width: 70, visible: true },
+        { key: 'industry', header: '', width: 65, visible: true },
         { key: 'rank', header: '', width: 25, visible: false },
         { key: 'stockCode', header: '代號', width: 50, visible: true },
         { key: 'kline', header: '', width: 8, visible: true },
         { key: 'changeRatio', header: '漲跌%', width: 55, visible: true },
         { key: 'currentPrice', header: '價格', width: 50, visible: true },
-        { key: 'tradeTurnover', header: '成交額', width: 45, visible: true },
-        { key: 'volumeRatio', header: '量比', width: 30, visible: true },
+        { key: 'tradeTurnover', header: '成交額', width: 45, visible: false },
+        { key: 'volumeRatio', header: '量比', width: 28, visible: true },
+        { key: 'rsi', header: 'RSI', width: 30, visible: true },
         { key: 'ma', header: 'MA', width: 36, visible: true },
     ],
 
     // 港股欄位設定
     COLUMN_SETTINGS_HK: [
-        { key: 'industry', header: '', width: 70, visible: true },
+        { key: 'industry', header: '', width: 65, visible: true },
         { key: 'rank', header: '', width: 25, visible: false },
-        { key: 'stockName', header: '名稱', width: 85, visible: true },
+        { key: 'stockName', header: '名稱', width: 65, visible: true },
         { key: 'kline', header: '', width: 8, visible: true },
         { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
         { key: 'currentPrice', header: '價格', width: 50, visible: true },
         { key: 'tradeTurnover', header: '成交額', width: 45, visible: false },
-        { key: 'volumeRatio', header: '量比', width: 30, visible: true },
+        { key: 'volumeRatio', header: '量比', width: 28, visible: true },
+        { key: 'rsi', header: 'RSI', width: 30, visible: true },
         { key: 'ma', header: 'MA', width: 36, visible: true },
     ],
 
     // 混合市場自選股票欄位設定
     COLUMN_SETTINGS_MIXED: [
-        { key: 'industry', header: '', width: 70, visible: true },
+        { key: 'industry', header: '', width: 65, visible: true },
         { key: 'rank', header: '', width: 25, visible: false },
-        { key: 'stockDisplay', header: '名稱/代號', width: 85, visible: true },
+        { key: 'stockDisplay', header: '名稱/代號', width: 65, visible: true },
         { key: 'kline', header: '', width: 8, visible: true },
         { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
         { key: 'currentPrice', header: '價格', width: 50, visible: true },
         { key: 'tradeTurnover', header: '成交額', width: 45, visible: false },
-        { key: 'volumeRatio', header: '量比', width: 30, visible: true },
+        { key: 'volumeRatio', header: '量比', width: 28, visible: true },
+        { key: 'rsi', header: 'RSI', width: 30, visible: true },
         { key: 'ma', header: 'MA', width: 36, visible: true },
     ],
 
@@ -552,6 +565,62 @@ class WatchlistCache {
         } catch (e) {
             console.error(`清除自選快取失敗: ${e.message}`);
         }
+    }
+}
+
+// ==================== 工具類：RSI 計算器 ====================
+/**
+ * RSI（相對強弱指標）計算工具類
+ * 使用 Wilder's Smoothing Method
+ */
+class RSICalculator {
+    /**
+     * 計算 RSI
+     * @param {Array<number>} prices - 收盤價數組（至少需要 days+2 天）
+     * @param {number} days - 計算週期（預設 6）
+     * @returns {Object|null} { current: 當前RSI, previous: 前一日RSI } 或 null
+     */
+    static calculateRSI(prices, days = 6) {
+        if (!prices || prices.length < days + 2) return null;
+
+        // 計算最近兩天的 RSI（用於趨勢判斷）
+        const currentRSI = this.#computeRSI(prices.slice(-days - 1), days);
+        const previousRSI = this.#computeRSI(prices.slice(-days - 2, -1), days);
+
+        if (currentRSI === null || previousRSI === null) return null;
+
+        return {
+            current: currentRSI,
+            previous: previousRSI
+        };
+    }
+
+    /**
+     * 計算單一 RSI 值（私有方法）
+     */
+    static #computeRSI(prices, days) {
+        if (prices.length < days + 1) return null;
+
+        let gains = 0;
+        let losses = 0;
+
+        // 計算價格變動
+        for (let i = 1; i <= days; i++) {
+            const change = prices[i] - prices[i - 1];
+            if (change > 0) {
+                gains += change;
+            } else {
+                losses += Math.abs(change);
+            }
+        }
+
+        const avgGain = gains / days;
+        const avgLoss = losses / days;
+
+        if (avgLoss === 0) return 100; // 沒有損失 = RSI 100
+
+        const rs = avgGain / avgLoss;
+        return 100 - (100 / (1 + rs));
     }
 }
 
@@ -1147,42 +1216,63 @@ async function enrichData(data, client, caches, market, mode) {
         // 1. 獲取 K線數據 (用於 Sparkline)
         const klineData = await KlineDataProcessor.fetch(stock, client, caches);
 
-        // 2. 處理 MA 數據 (如果需要)
-        let maData = null;
+        // 2. 判斷是否需要歷史數據（MA 或 RSI）
         const needsMA = visibleColumns.some(col => col.key === 'ma');
+        const needsRSI = visibleColumns.some(col => col.key === 'rsi');
 
-        if (needsMA) {
+        let maData = null;
+        let rsiData = null;
+
+        // ⚡ 性能優化：只在需要時查詢一次歷史數據
+        if (needsMA || needsRSI) {
             try {
-                // 直接獲取歷史數據 (201天足夠計算 200MA)
                 const market = CounterIdHelper.identifyMarket(stock.stockCode);
                 const instrumentType = stock.instrumentType === 4 ? 'ETF' : 'ST';
                 const counterId = CounterIdHelper.build(stock.stockCode, market, instrumentType);
 
+                // 一次查詢，201 天足夠計算 200MA 和 RSI
                 const history = await client.getKlineHistory(counterId, 201);
 
                 if (history && history.length > 0) {
-                    // 預先解析收盤價，避免重複解析
+                    // ⚡ 性能優化：預先解析收盤價，避免 MA 和 RSI 重複解析
                     const prices = history.map(k => parseFloat(k.close));
 
-                    maData = {};
-                    CONFIG.MA_CONFIG.DAYS.forEach(day => {
-                        const ma = MACalculator.calculateMA(prices, day);
-                        const deviation = MACalculator.calculateDeviation(stock.currentPrice, ma);
-                        maData[`ma${day}`] = {
-                            value: ma,
-                            deviation: deviation
-                        };
-                    });
+                    // 3. 計算 MA（如果需要）
+                    if (needsMA) {
+                        maData = {};
+                        CONFIG.MA_CONFIG.DAYS.forEach(day => {
+                            const ma = MACalculator.calculateMA(prices, day);
+                            const deviation = MACalculator.calculateDeviation(stock.currentPrice, ma);
+                            maData[`ma${day}`] = {
+                                value: ma,
+                                deviation: deviation
+                            };
+                        });
+                    }
+
+                    // 4. 計算 RSI（如果需要）
+                    if (needsRSI) {
+                        const rsiResult = RSICalculator.calculateRSI(prices, CONFIG.RSI_CONFIG.DAYS);
+
+                        if (rsiResult) {
+                            const trend = rsiResult.current > rsiResult.previous ? 'up' : 'down';
+                            rsiData = {
+                                value: rsiResult.current,
+                                trend: trend
+                            };
+                        }
+                    }
                 }
             } catch (e) {
-                console.error(`[MA] ${stock.stockCode} 計算失敗: ${e.message}`);
+                console.error(`[指標] ${stock.stockCode} 計算失敗: ${e.message}`);
             }
         }
 
         return {
             ...stock,
             klineData,
-            maData
+            maData,
+            rsiData
         };
     }));
 }
@@ -1295,6 +1385,11 @@ function addColumnCell(rowStack, col, stock, rowColor, colorCalc, mode) {
 
     if (col.key === 'ma') {
         drawMATriangle(colStack, stock.maData);
+        return;
+    }
+
+    if (col.key === 'rsi') {
+        drawRSI(colStack, stock.rsiData);
         return;
     }
 
@@ -1603,6 +1698,77 @@ function drawMATriangle(colStack, maData) {
     imgWidget.centerAlignImage();
 }
 
+/**
+ * 繪製 RSI 指標（含趨勢三角形與漸層色）
+ * @param {WidgetStack} colStack 
+ * @param {Object} rsiData - { value, trend }
+ */
+function drawRSI(colStack, rsiData) {
+    if (!rsiData || rsiData.value === null) {
+        const t = colStack.addText('-');
+        t.font = Font.systemFont(CONFIG.FONT_SIZE);
+        t.textColor = new Color('#666666');
+        return;
+    }
+
+    const { value, trend } = rsiData;
+
+    // 建立水平堆疊以分別設定三角形與數值的顏色
+    const rowStack = colStack.addStack();
+    rowStack.layoutHorizontally();
+    rowStack.centerAlignContent();
+
+    // 1. 三角形符號：使用 K 線升跌顏色
+    const arrow = trend === 'up' ? '▲' : '▼';
+    const arrowColor = trend === 'up'
+        ? new Color(CONFIG.KLINE.GAIN_COLOR)  // 綠色
+        : new Color(CONFIG.KLINE.LOSS_COLOR); // 紅色
+
+    const arrowText = rowStack.addText(arrow);
+    arrowText.font = Font.mediumSystemFont(8);  // 三角形字體大小 8
+    arrowText.textColor = arrowColor;
+    arrowText.lineLimit = 1;
+
+    // 2. RSI 數值：使用漸層色
+    const rsiValue = Math.max(0, Math.min(100, value));
+    const valueColor = rsiValue <= 50
+        ? interpolateColor(CONFIG.RSI_CONFIG.COLORS.WEAK, CONFIG.RSI_CONFIG.COLORS.NEUTRAL, rsiValue / 50)
+        : interpolateColor(CONFIG.RSI_CONFIG.COLORS.NEUTRAL, CONFIG.RSI_CONFIG.COLORS.STRONG, (rsiValue - 50) / 50);
+
+    const valueText = rowStack.addText(Math.round(value).toString());
+    valueText.font = Font.mediumSystemFont(CONFIG.FONT_SIZE);
+    valueText.textColor = valueColor;
+    valueText.lineLimit = 1;
+}
+
+/**
+ * 線性插值計算顏色
+ * @param {string} color1 - 起始顏色 (hex)
+ * @param {string} color2 - 結束顏色 (hex)
+ * @param {number} ratio - 比例 (0-1)
+ * @returns {Color} 插值顏色
+ */
+function interpolateColor(color1, color2, ratio) {
+    const hex1 = color1.replace('#', '');
+    const hex2 = color2.replace('#', '');
+
+    const r1 = parseInt(hex1.substring(0, 2), 16);
+    const g1 = parseInt(hex1.substring(2, 4), 16);
+    const b1 = parseInt(hex1.substring(4, 6), 16);
+
+    const r2 = parseInt(hex2.substring(0, 2), 16);
+    const g2 = parseInt(hex2.substring(2, 4), 16);
+    const b2 = parseInt(hex2.substring(4, 6), 16);
+
+    const r = Math.round(r1 + (r2 - r1) * ratio);
+    const g = Math.round(g1 + (g2 - g1) * ratio);
+    const b = Math.round(b1 + (b2 - b1) * ratio);
+
+    const toHex = (n) => n.toString(16).padStart(2, '0');
+    return new Color(`#${toHex(r)}${toHex(g)}${toHex(b)}`);
+}
+
+// ==================== Widget 布局建構 ====================*/
 /**
  * 建立錯誤 Widget
  */

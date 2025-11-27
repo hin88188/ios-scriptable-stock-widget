@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [2.10.0] - 2025-11-28 **RSI 相對強弱指標**
+
+### Added
+- **RSI 配置系統** `CONFIG.RSI_CONFIG`
+  - 預設 6 日週期（可自訂）
+  - 反轉式配色：高 RSI (100) 紅色 `#ef4444`、中性 (50) 灰色、低 RSI (0) 綠色 `#22c55e`
+  - 符合傳統技術分析：超買紅色、超賣綠色
+- **RSI 欄位** 新增至所有欄位設定（美股/港股/混合）
+  - 位置：量比與 MA 之間
+  - 寬度：30px
+- **RSI 視覺化**
+  - 趨勢三角形（▲/▼）使用 K 線升跌顏色（綠/紅）
+  - RSI 數值使用漸層色（紅-灰-綠）
+  - 三角形字體大小：8px（精緻顯示）
+- **RSI 計算工具類** `RSICalculator`
+  - `calculateRSI()` - Wilder's RSI 計算法
+  - 同時計算當前與前一日 RSI 用於趨勢判斷
+  - 時間複雜度：O(n)，n 為週期天數
+- **顏色插值工具** `interpolateColor()`
+  - 線性插值計算任意兩色間漸層
+  - 支援 RGB 十六進制格式
+
+### Optimized
+- **零額外 API 呼叫**：RSI 與 MA 共用 `getKlineHistory()` 查詢
+- **單次解析**：收盤價陣列共用，避免重複 `parseFloat()`
+- **條件執行**：使用 `needsMA || needsRSI` 判斷，減少不必要運算
+- **內聯計算**：顏色插值直接呼叫，減少函數開銷
+- **性能影響**：每股 +6 次加減法（可忽略）
+
+### Changed
+- **欄位寬度優化**
+  - `industry`: 70px → 65px（縮減 5px）
+  - `stockName/stockDisplay`: 85px → 65px（僅 HK/MIXED，縮減 20px）
+  - `volumeRatio`: 30px → 28px（縮減 2px）
+- **成交額欄位**：美股模式 `tradeTurnover` 改為不顯示
+- **enrichData 重構**：MA 與 RSI 共用歷史資料查詢邏輯
+
+### Technical
+- 新增函數：`drawRSI()`、`interpolateColor()`
+- 新增類別：`RSICalculator`
+- 修改函數：`enrichData()`、`addColumnCell()`
+
 ## [2.9.0] - 2025-11-26 **MA 均線完整實作**
 
 ### Added
