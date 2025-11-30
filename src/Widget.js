@@ -1,13 +1,13 @@
 // Widget.js
 // 盤中成交額排行 Widget - 支持美股/港股
-// 版本: v2.10.0
+// 版本: v3.0.0
 
-// ==================== 設定區 ====================
+// ==================== 1. 配置與常數 (Config) ====================
 const CONFIG = {
     // 市場選擇
     MARKET: 'AUTO', // 'AUTO' 智慧切換 / 'US' 美股 / 'HK' 港股
 
-    // 自選股票配置，將下方註解打開即可使用
+    // 自選股票配置 (開啟下方註解即可使用)
     // CUSTOM_WATCHLIST: ['NVDA', 'SPY', '0700', '9988', '2800'],
 
     // 顯示設定
@@ -18,25 +18,27 @@ const CONFIG = {
 
     // 快取設定
     CACHE_DURATION: 1,          // 主列表快取時間(分鐘)
-    KLINE_CACHE_DURATION: 1,    // K線數據快取時間(分鐘)
+    HISTORY_CACHE_DURATION: 1, // 歷史數據(K線/MA)快取時間(分鐘)
 
     // 效能設定
-    MAX_CONCURRENT_REQUESTS: 10, // 最大並發請求數
+    MAX_CONCURRENT_REQUESTS: 20, // 最大並發請求數
     REQUEST_RETRY_COUNT: 3,      // 請求重試次數
     REQUEST_TIMEOUT: 10000,      // 請求超時(毫秒)
 
     // 調試模式
-    DEBUG_MODE: false, // 設為 true 保留 _rawData 和 _source
+    DEBUG_MODE: false,
 
     // Cookie（選填）
     COOKIES: '',
 
-    // 市場 URL / Endpoint 配置（僅作為基底，實際組裝由 LbkrsClient 處理）
-    MARKET_URLS: {
+    // API 設定
+    API: {
         BASE: 'https://m-gl.lbkrs.com',
-        RANKING_PATH: '/api/forward/newmarket/revision/rank/pc/list',
-        DETAIL_PATH: '/api/forward/v3/quote/stock/detail',
-        KLINE_PATH: '/api/forward/v3/quote/kline'
+        ENDPOINTS: {
+            RANKING: '/api/forward/newmarket/revision/rank/pc/list',
+            DETAIL: '/api/forward/v3/quote/stock/detail',
+            KLINE: '/api/forward/v3/quote/kline'
+        }
     },
 
     // MA (均線) 配置
@@ -64,23 +66,25 @@ const CONFIG = {
         }
     },
 
-    // K 線配置
-    KLINE: {
+    // K 線 (Candle) 配置
+    KLINE_CONFIG: {
         WIDTH: 8,            // K線總寬度
         HEIGHT: 12,          // K線總高度
         BODY_WIDTH: 8,       // 實體寬度 (填滿)
         SHADOW_WIDTH: 1.5,   // 影線寬度
-        GAIN_COLOR: '#00C46B',      // 漲 (收盤 > 開盤)
-        LOSS_COLOR: '#FF3B3B',      // 跌 (收盤 < 開盤)
-        NEUTRAL_COLOR: '#CCCCCC'    // 平盤
+        COLORS: {
+            GAIN: '#00C46B',
+            LOSS: '#FF3B3B',
+            NEUTRAL: '#CCCCCC'
+        }
     },
 
-    // 美股欄位設定
-    COLUMN_SETTINGS_US: [
+    // 欄位設定 (US)
+    COLUMNS_US: [
         { key: 'industry', header: '', width: 65, visible: true },
         { key: 'rank', header: '', width: 25, visible: false },
         { key: 'stockCode', header: '代號', width: 50, visible: true },
-        { key: 'kline', header: '', width: 8, visible: true },
+        { key: 'candle', header: '', width: 8, visible: true },
         { key: 'changeRatio', header: '漲跌%', width: 55, visible: true },
         { key: 'currentPrice', header: '價格', width: 50, visible: true },
         { key: 'tradeTurnover', header: '成交額', width: 45, visible: false },
@@ -89,12 +93,12 @@ const CONFIG = {
         { key: 'ma', header: 'MA', width: 36, visible: true },
     ],
 
-    // 港股欄位設定
-    COLUMN_SETTINGS_HK: [
+    // 欄位設定 (HK)
+    COLUMNS_HK: [
         { key: 'industry', header: '', width: 65, visible: true },
         { key: 'rank', header: '', width: 25, visible: false },
         { key: 'stockName', header: '名稱', width: 65, visible: true },
-        { key: 'kline', header: '', width: 8, visible: true },
+        { key: 'candle', header: '', width: 8, visible: true },
         { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
         { key: 'currentPrice', header: '價格', width: 50, visible: true },
         { key: 'tradeTurnover', header: '成交額', width: 45, visible: false },
@@ -103,12 +107,12 @@ const CONFIG = {
         { key: 'ma', header: 'MA', width: 36, visible: true },
     ],
 
-    // 混合市場自選股票欄位設定
-    COLUMN_SETTINGS_MIXED: [
+    // 欄位設定 (Mixed/Watchlist)
+    COLUMNS_MIXED: [
         { key: 'industry', header: '', width: 65, visible: true },
         { key: 'rank', header: '', width: 25, visible: false },
         { key: 'stockDisplay', header: '名稱/代號', width: 65, visible: true },
-        { key: 'kline', header: '', width: 8, visible: true },
+        { key: 'candle', header: '', width: 8, visible: true },
         { key: 'changeRatio', header: '漲跌%', width: 50, visible: true },
         { key: 'currentPrice', header: '價格', width: 50, visible: true },
         { key: 'tradeTurnover', header: '成交額', width: 45, visible: false },
@@ -117,53 +121,11 @@ const CONFIG = {
         { key: 'ma', header: 'MA', width: 36, visible: true },
     ],
 
-    // 色彩系統
-    COLORS: {
-        GAIN_LEVELS: {
-            level5: '#008C4C', // > +5%
-            level4: '#00A85C', // +3% ~ +5%
-            level3: '#00C46B', // +1.5% ~ +3%
-            level2: '#4BD68D', // +0.5% ~ +1.5%
-            level1: '#9BE39E'  // +0% ~ +0.5%
-        },
-        LOSS_LEVELS: {
-            level5: '#C60000', // < -5%
-            level4: '#E62121', // -3% ~ -5%
-            level3: '#FF3B3B', // -1.5% ~ -3%
-            level2: '#FF6E6E', // -0.5% ~ -1.5%
-            level1: '#FF9B9B'  // -0% ~ -0.5%
-        },
-        NEUTRAL: '#CCCCCC',
-        background: Color.dynamic(Color.white(), new Color('#1C1C1E')),
-        text: Color.dynamic(Color.black(), Color.white()),
-        headerBackground: Color.dynamic(new Color('#F0F0F0'), new Color('#333333')),
-    },
-
-    // 量比色彩系統(冷→熱漸變)
-    VOLUME_RATIO_COLORS: {
-        coldest: '#4B6B8A',    // < 0.5:深藍灰
-        cold: '#3FA7D6',       // 0.5-1.5:中藍色
-        warm: '#6DD57E',       // 1.5-2.5:淡綠色
-        hot: '#FFD54F',        // 2.5-5.0:黃橙色
-        hottest: '#FF5252',    // > 5.0:鮮紅色
-    },
-
-    // 量比色彩計算閾值
-    VOLUME_RATIO_THRESHOLDS: {
-        COLDEST: 0.5,
-        COLD: 1.5,
-        WARM: 2.5,
-        HOT: 5.0,
-        MAX_CAP: 8.0,
-    },
-
-    // UI 常數
+    // UI 設定
     UI: {
         HEADER_PADDING: { top: 4, left: 12, bottom: 4, right: 12 },
         ROW_PADDING: { top: 0, left: 12, bottom: 0, right: 12 },
         PROGRESS_BAR_HEIGHT: 1,
-
-        // 新增：成交額線條配置
         TURNOVER_BAR: {
             MIN_WIDTH: 1,          // 最小線條寬度
             BACKGROUND_OPACITY: 0.1, // 背景透明度
@@ -173,810 +135,123 @@ const CONFIG = {
     }
 };
 
-// ==================== 工具類：Counter ID 管理 ====================
-/**
- * Counter ID 統一管理工具類
- * 負責 Counter ID 的生成、解析、市場識別、類型推斷
- */
-class CounterIdHelper {
+// ==================== 2. 核心工具 (Core & Utils) ====================
+
+class Logger {
+    static log(msg) {
+        console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
+    }
+    static error(msg) {
+        console.error(`[${new Date().toLocaleTimeString()}] [ERROR] ${msg}`);
+    }
+    static debug(msg) {
+        if (CONFIG.DEBUG_MODE) console.log(`[DEBUG] ${msg}`);
+    }
+}
+
+class Utils {
     /**
-     * 識別股票代碼所屬市場
-     * @param {string} stockCode - 股票代碼
-     * @returns {'US'|'HK'} 市場代碼
+     * 非阻塞延遲
      */
+    static async sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /**
+     * 格式化成交額
+     */
+    static formatTurnover(numStr) {
+        const value = this.parseTurnover(numStr);
+        if (isNaN(value) || value === 0) return String(numStr);
+        if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B';
+        if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M';
+        if (value >= 1e3) return (value / 1e3).toFixed(2) + 'K';
+        return value.toFixed(2);
+    }
+
+    static parseTurnover(numStr) {
+        if (typeof numStr !== 'string') return parseFloat(numStr) || 0;
+        const num = parseFloat(numStr.replace(/,/g, ''));
+        if (isNaN(num)) return 0;
+        const upper = numStr.toUpperCase();
+        if (upper.includes('億')) return num * 1e8;
+        if (upper.includes('萬')) return num * 1e4;
+        if (upper.includes('B')) return num * 1e9;
+        if (upper.includes('M')) return num * 1e6;
+        if (upper.includes('K')) return num * 1e3;
+        return num;
+    }
+
     static identifyMarket(stockCode) {
-        if (/^\d+$/.test(stockCode)) {
-            return 'HK'; // 純數字 = 港股
-        }
-        return 'US'; // 包含字母 = 美股
+        return /^\d+$/.test(stockCode) ? 'HK' : 'US';
     }
 
-    /**
-     * 格式化股票代碼
-     * @param {string} stockCode - 原始代碼
-     * @param {string} market - 市場代碼
-     * @returns {string} 格式化後的代碼
-     */
     static formatStockCode(stockCode, market) {
-        if (market === 'HK') {
-            // 港股：去除前導零
-            return String(parseInt(stockCode, 10));
-        }
-        // 美股：保持原樣
-        return stockCode;
+        return market === 'HK' ? String(parseInt(stockCode, 10)) : stockCode;
     }
 
-    /**
-     * 建立 Counter ID
-     * @param {string} stockCode - 股票代碼
-     * @param {string} market - 市場代碼
-     * @param {string} type - 儀器類型 ('auto', 'ST', 'ETF')
-     * @returns {string} Counter ID
-     */
-    static build(stockCode, market, type = 'ST') {
-        const formattedCode = this.formatStockCode(stockCode, market);
-        return `${type}/${market}/${formattedCode}`;
+    static buildCounterId(stockCode, market, type = 'ST') {
+        return `${type}/${market}/${this.formatStockCode(stockCode, market)}`;
     }
 
-    /**
-     * 解析 Counter ID
-     * @param {string} counterId - Counter ID
-     * @returns {Object} { stockCode, instrumentType, market }
-     */
-    static parse(counterId) {
+    static parseCounterId(counterId) {
         const parts = counterId.split('/');
-        if (parts.length !== 3) {
-            throw new Error(`無效的 Counter ID 格式: ${counterId}`);
-        }
         return {
-            instrumentType: parts[0], // 'ST' or 'ETF'
-            market: parts[1],          // 'US' or 'HK'
-            stockCode: parts[2]        // 代碼
+            type: parts[0],
+            market: parts[1],
+            code: parts[2]
         };
-    }
-
-    /**
-     * 推斷儀器類型
-     * @param {string} counterId - Counter ID
-     * @returns {'ST'|'ETF'} 儀器類型
-     */
-    static identifyType(counterId) {
-        return counterId.startsWith('ETF/') ? 'ETF' : 'ST';
     }
 }
 
-// ==================== 工具類：數據映射器 ====================
-/**
- * 統一數據映射工具類
- * 負責將 Lbkrs API 數據轉換為標準格式
- */
-class StockDataMapper {
-    /**
-     * 從排行榜 API 映射數據
-     * @param {Object} lbkrsItem - Lbkrs 排行榜項目
-     * @returns {Object} 標準化股票數據
-     */
-    static fromRankingAPI(lbkrsItem) {
-        const indicators = lbkrsItem.indicators;
-
-        if (!indicators || indicators.length < 18) {
-            throw new Error(`Lbkrs 數據不完整: 缺少必要的指標數組`);
-        }
-
-        // 提取基礎數據
-        const currentPrice = parseFloat(indicators[0]) || 0;
-        const changePct = parseFloat(indicators[1]) || 0;
-        const tradeTurnover = indicators[4] || '0';
-        const volumeRatio = parseFloat(indicators[7]) || 0;
-        const rawIndustry = indicators[17];
-
-        // 計算漲跌幅百分比
-        const changePercent = changePct * 100;
-        const changeRatio = `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%`;
-
-        // 處理產業分類
-        const instrumentType = CounterIdHelper.identifyType(lbkrsItem.counter_id);
-        const industry = this.#extractIndustry(rawIndustry, instrumentType, lbkrsItem.name);
-
+class ColorTheme {
+    static get GAIN_LEVELS() {
         return {
-            stockCode: CounterIdHelper.parse(lbkrsItem.counter_id).stockCode,
-            stockName: lbkrsItem.name || '--',
-            currentPrice,
-            changeRatio,
-            changePercent,
-            tradeTurnover,
-            volumeRatio,
-            instrumentType: instrumentType === 'ETF' ? 4 : 3,
-            industry,
-            klineData: null, // 排行榜不含 K線數據
-            ...(CONFIG.DEBUG_MODE && { _rawData: lbkrsItem, _source: 'ranking' })
+            level5: '#008C4C', level4: '#00A85C', level3: '#00C46B', level2: '#4BD68D', level1: '#9BE39E'
         };
     }
-
-    /**
-     * 從詳細 API 映射數據
-     * @param {Object} detailData - Lbkrs Detail API 數據
-     * @param {string} counterId - Counter ID
-     * @returns {Object} 標準化股票數據
-     */
-    static fromDetailAPI(detailData, counterId) {
-        if (!detailData) {
-            throw new Error('Lbkrs Detail API 響應數據為空');
-        }
-
-        const parsed = CounterIdHelper.parse(counterId);
-        const currentPrice = parseFloat(detailData.last_done) || 0;
-
-        // 計算漲跌幅
-        const changePercent = this.#calculateChangePercent(detailData, currentPrice);
-        const changeRatio = `${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%`;
-
-        // 提取成交額（嘗試多個字段）
-        const tradeTurnover = detailData.balance ||
-            detailData.total_balance ||
-            detailData.amount ||
-            '0';
-
-        const volumeRatio = parseFloat(detailData.volume_rate) || 0;
-
-        // 處理產業分類
-        const instrumentType = parsed.instrumentType;
-        const industry = this.#extractIndustry(
-            detailData.industry_name,
-            instrumentType,
-            detailData.stock_name
-        );
-
-        // 建立 K線數據
-        const klineData = this.#buildKlineData(detailData, currentPrice);
-
+    static get LOSS_LEVELS() {
         return {
-            stockCode: parsed.stockCode,
-            stockName: detailData.stock_name || '--',
-            currentPrice,
-            changeRatio,
-            changePercent,
-            tradeTurnover,
-            volumeRatio,
-            instrumentType: instrumentType === 'ETF' ? 4 : 3,
-            industry,
-            klineData,
-            ...(CONFIG.DEBUG_MODE && { _rawData: detailData, _source: 'watchlist' })
+            level5: '#C60000', level4: '#E62121', level3: '#FF3B3B', level2: '#FF6E6E', level1: '#FF9B9B'
         };
     }
+    static get NEUTRAL() { return '#CCCCCC'; }
+    static get BACKGROUND() { return Color.dynamic(Color.white(), new Color('#1C1C1E')); }
+    static get TEXT() { return Color.dynamic(Color.black(), Color.white()); }
+    static get HEADER_BG() { return Color.dynamic(new Color('#F0F0F0'), new Color('#333333')); }
 
-    /**
-     * 計算漲跌幅百分比（私有方法）
-     */
-    static #calculateChangePercent(detailData, currentPrice) {
-        const prevClose = parseFloat(detailData.prev_close);
-        if (prevClose && prevClose > 0) {
-            return ((currentPrice - prevClose) / prevClose) * 100;
-        }
-        return (parseFloat(detailData.chg) || 0) * 100;
+    static getChangeColor(ratio) {
+        if (ratio > 5) return new Color(this.GAIN_LEVELS.level5);
+        if (ratio > 3) return new Color(this.GAIN_LEVELS.level4);
+        if (ratio > 1.5) return new Color(this.GAIN_LEVELS.level3);
+        if (ratio > 0.5) return new Color(this.GAIN_LEVELS.level2);
+        if (ratio > 0) return new Color(this.GAIN_LEVELS.level1);
+        if (ratio < -5) return new Color(this.LOSS_LEVELS.level5);
+        if (ratio < -3) return new Color(this.LOSS_LEVELS.level4);
+        if (ratio < -1.5) return new Color(this.LOSS_LEVELS.level3);
+        if (ratio < -0.5) return new Color(this.LOSS_LEVELS.level2);
+        if (ratio < 0) return new Color(this.LOSS_LEVELS.level1);
+        return new Color(this.NEUTRAL);
     }
 
-    /**
-     * 提取產業分類（私有方法）
-     */
-    static #extractIndustry(rawIndustry, instrumentType, stockName) {
-        if (instrumentType === 'ETF') {
-            return stockName || 'ETF';
-        }
-        return (rawIndustry && rawIndustry.trim()) ? rawIndustry.trim() : '--';
-    }
+    static getVolumeColor(ratio) {
+        // 冷→熱: 藍灰 -> 藍 -> 綠 -> 黃 -> 紅
+        const colors = ['#4B6B8A', '#3FA7D6', '#6DD57E', '#FFD54F', '#FF5252'];
+        const thresholds = [0.5, 1.5, 2.5, 5.0, 8.0];
+        const capped = Math.min(ratio, 8.0);
 
-    /**
-     * 建立 K線數據（私有方法）
-     */
-    static #buildKlineData(detailData, currentPrice) {
-        const open = parseFloat(detailData.open) || null;
-        const high = parseFloat(detailData.high) || null;
-        const low = parseFloat(detailData.low) || null;
-
-        // 驗證數據完整性
-        if (!open || !high || !low || !currentPrice) {
-            return null;
-        }
-
-        return {
-            open,
-            high,
-            low,
-            close: currentPrice
-        };
-    }
-}
-
-// ==================== 工具類：K線數據處理器 ====================
-/**
- * K線數據處理工具類
- * 負責 K線數據的提取、驗證、重建、獲取
- */
-class KlineDataProcessor {
-    /**
-     * 驗證 K線數據完整性
-     * @param {Object} klineData - K線數據
-     * @returns {boolean} 是否有效
-     */
-    static validate(klineData) {
-        if (!klineData) return false;
-        const { open, high, low, close } = klineData;
-        return !!(open && high && low && close);
-    }
-
-    /**
-     * 從詳細數據重建 K線
-     * @param {Object} rawData - 原始 Detail API 數據
-     * @param {number} fallbackPrice - 備用價格
-     * @returns {Object|null} K線數據或 null
-     */
-    static rebuild(rawData, fallbackPrice) {
-        if (!rawData) return null;
-
-        const klineData = {
-            open: parseFloat(rawData.open) || null,
-            high: parseFloat(rawData.high) || null,
-            low: parseFloat(rawData.low) || null,
-            close: parseFloat(rawData.last_done) || fallbackPrice || null
-        };
-
-        return this.validate(klineData) ? klineData : null;
-    }
-
-    /**
-     * 獲取股票的 K線數據
-     * @param {Object} stock - 股票數據
-     * @param {LbkrsClient} fetcher - 數據抓取器（相容舊介面，需提供 fetchLbkrsDetailData）
-     * @param {Object} caches - 快取管理器集合
-     * @returns {Promise<Object|null>} K線數據或 null
-     */
-    static async fetch(stock, fetcher, caches) {
-        // 1. 如果已有有效 K線，直接返回
-        if (this.validate(stock.klineData)) {
-            return stock.klineData;
-        }
-
-        // 2. 自選股票：從原始數據重建
-        if (CONFIG.DEBUG_MODE && stock._source === 'watchlist' && stock._rawData) {
-            const rebuilt = this.rebuild(stock._rawData, stock.currentPrice);
-            if (rebuilt) {
-                console.log(`[K線重建] ${stock.stockCode}: 成功`);
-                return rebuilt;
+        if (capped < thresholds[0]) return new Color(colors[0]);
+        for (let i = 0; i < thresholds.length - 1; i++) {
+            if (capped < thresholds[i + 1]) {
+                const t1 = thresholds[i], t2 = thresholds[i + 1];
+                const c1 = colors[i], c2 = colors[i + 1];
+                return this.interpolate(c1, c2, (capped - t1) / (t2 - t1));
             }
         }
-
-        // 3. 檢查 K線快取
-        const cached = caches.kline.get(stock.stockCode);
-        if (cached) return cached;
-
-        // 4. 從 API 獲取
-        try {
-            const market = CounterIdHelper.identifyMarket(stock.stockCode);
-            const instrumentType = stock.instrumentType === 4 ? 'ETF' : 'ST';
-            const counterId = CounterIdHelper.build(stock.stockCode, market, instrumentType);
-
-            const data = await fetcher.fetchLbkrsDetailData(counterId, `kline_${stock.stockCode}`);
-
-            if (data?.data) {
-                const klineData = this.rebuild(data.data, stock.currentPrice);
-                if (klineData) {
-                    caches.kline.set(stock.stockCode, klineData);
-                    return klineData;
-                }
-            }
-        } catch (error) {
-            console.error(`[K線] ${stock.stockCode} 獲取失敗: ${error.message}`);
-        }
-
-        return null;
-    }
-}
-
-// ==================== 快取類：排行榜快取 ====================
-class RankingCache {
-    constructor(config) {
-        this.config = config;
-        this.fm = FileManager.local();
-        this.paths = {
-            US: this.fm.joinPath(this.fm.documentsDirectory(), 'lbkrs_ranking_US.json'),
-            HK: this.fm.joinPath(this.fm.documentsDirectory(), 'lbkrs_ranking_HK.json')
-        };
-        this.duration = config.CACHE_DURATION;
+        return new Color(colors[4]);
     }
 
-    get(market) {
-        const path = this.paths[market];
-        if (!this.fm.fileExists(path)) return null;
-
-        try {
-            const cache = JSON.parse(this.fm.readString(path));
-            const age = (new Date() - new Date(cache.timestamp)) / 60000;
-
-            if (age > this.duration) return null;
-            return cache;
-        } catch (e) {
-            console.error(`排行榜快取讀取失敗: ${e.message}`);
-            return null;
-        }
-    }
-
-    set(market, data) {
-        try {
-            const path = this.paths[market];
-            this.fm.writeString(path, JSON.stringify(data));
-        } catch (e) {
-            console.error(`排行榜快取寫入失敗: ${e.message}`);
-        }
-    }
-}
-
-// ==================== 快取類：自選股票快取 ====================
-class WatchlistCache {
-    constructor(config) {
-        this.config = config;
-        this.fm = FileManager.local();
-        this.path = this.fm.joinPath(this.fm.documentsDirectory(), 'lbkrs_watchlist.json');
-        this.duration = config.CACHE_DURATION;
-    }
-
-    get(stockCode) {
-        if (!this.fm.fileExists(this.path)) return null;
-
-        try {
-            const cache = JSON.parse(this.fm.readString(this.path));
-            const item = cache[stockCode];
-
-            if (!item) return null;
-
-            const age = (new Date() - new Date(item.timestamp)) / 60000;
-            if (age > this.duration) return null;
-
-            return item.value;
-        } catch (e) {
-            console.error(`自選快取讀取失敗: ${e.message}`);
-            return null;
-        }
-    }
-
-    set(stockCode, data) {
-        try {
-            let cache = {};
-            if (this.fm.fileExists(this.path)) {
-                cache = JSON.parse(this.fm.readString(this.path));
-            }
-
-            cache[stockCode] = {
-                value: data,
-                timestamp: new Date()
-            };
-
-            this.fm.writeString(this.path, JSON.stringify(cache, null, 2));
-        } catch (e) {
-            console.error(`自選快取寫入失敗: ${e.message}`);
-        }
-    }
-
-    clear() {
-        try {
-            if (this.fm.fileExists(this.path)) {
-                this.fm.remove(this.path);
-            }
-        } catch (e) {
-            console.error(`清除自選快取失敗: ${e.message}`);
-        }
-    }
-}
-
-// ==================== 工具類：RSI 計算器 ====================
-/**
- * RSI（相對強弱指標）計算工具類
- * 使用 Wilder's Smoothing Method
- */
-class RSICalculator {
-    /**
-     * 計算 RSI
-     * @param {Array<number>} prices - 收盤價數組（至少需要 days+2 天）
-     * @param {number} days - 計算週期（預設 6）
-     * @returns {Object|null} { current: 當前RSI, previous: 前一日RSI } 或 null
-     */
-    static calculateRSI(prices, days = 6) {
-        if (!prices || prices.length < days + 2) return null;
-
-        // 計算最近兩天的 RSI（用於趨勢判斷）
-        const currentRSI = this.#computeRSI(prices.slice(-days - 1), days);
-        const previousRSI = this.#computeRSI(prices.slice(-days - 2, -1), days);
-
-        if (currentRSI === null || previousRSI === null) return null;
-
-        return {
-            current: currentRSI,
-            previous: previousRSI
-        };
-    }
-
-    /**
-     * 計算單一 RSI 值（私有方法）
-     */
-    static #computeRSI(prices, days) {
-        if (prices.length < days + 1) return null;
-
-        let gains = 0;
-        let losses = 0;
-
-        // 計算價格變動
-        for (let i = 1; i <= days; i++) {
-            const change = prices[i] - prices[i - 1];
-            if (change > 0) {
-                gains += change;
-            } else {
-                losses += Math.abs(change);
-            }
-        }
-
-        const avgGain = gains / days;
-        const avgLoss = losses / days;
-
-        if (avgLoss === 0) return 100; // 沒有損失 = RSI 100
-
-        const rs = avgGain / avgLoss;
-        return 100 - (100 / (1 + rs));
-    }
-}
-
-// ==================== 快取類：K線快取 ====================
-class KlineCache {
-    constructor(config) {
-        this.config = config;
-        this.fm = FileManager.local();
-        this.path = this.fm.joinPath(this.fm.documentsDirectory(), 'lbkrs_kline.json');
-        this.duration = config.KLINE_CACHE_DURATION;
-    }
-
-    get(stockCode) {
-        if (!this.fm.fileExists(this.path)) return null;
-
-        try {
-            const cache = JSON.parse(this.fm.readString(this.path));
-            const item = cache[stockCode];
-
-            if (!item) return null;
-
-            const age = (new Date() - new Date(item.timestamp)) / 60000;
-            if (age > this.duration) return null;
-
-            return item.value;
-        } catch (e) {
-            console.error(`K線快取讀取失敗: ${e.message}`);
-            return null;
-        }
-    }
-
-    set(stockCode, klineData) {
-        try {
-            let cache = {};
-            if (this.fm.fileExists(this.path)) {
-                cache = JSON.parse(this.fm.readString(this.path));
-            }
-
-            cache[stockCode] = {
-                value: klineData,
-                timestamp: new Date()
-            };
-
-            this.fm.writeString(this.path, JSON.stringify(cache, null, 2));
-        } catch (e) {
-            console.error(`K線快取寫入失敗: ${e.message}`);
-        }
-    }
-
-    clear() {
-        try {
-            if (this.fm.fileExists(this.path)) {
-                this.fm.remove(this.path);
-            }
-        } catch (e) {
-            console.error(`清除K線快取失敗: ${e.message}`);
-        }
-    }
-}
-
-// ==================== 核心類別：請求佇列管理 ====================
-class RequestQueue {
-    constructor(getConcurrencyFn) {
-        this.maxConcurrent = 10;
-        this.getConcurrencyFn = getConcurrencyFn || (() => 10);
-        this.running = 0;
-        this.queue = [];
-    }
-
-    getConcurrency() {
-        if (typeof this.getConcurrencyFn === 'function') {
-            return Math.min(this.getConcurrencyFn(), 30);
-        }
-        return Math.min(this.maxConcurrent, 30);
-    }
-
-    async add(requestFn) {
-        return new Promise((resolve, reject) => {
-            this.queue.push({ requestFn, resolve, reject });
-            this.process();
-        });
-    }
-
-    async process() {
-        const currentMax = this.getConcurrency();
-        if (this.running >= currentMax || this.queue.length === 0) return;
-
-        this.running++;
-        const { requestFn, resolve, reject } = this.queue.shift();
-
-        try {
-            const result = await requestFn();
-            resolve(result);
-        } catch (error) {
-            reject(error);
-        } finally {
-            this.running--;
-            this.process();
-        }
-    }
-}
-
-// ==================== 核心類別：資料抓取器 ====================
-class DataFetcher {
-    constructor(config) {
-        this.config = config;
-        this.queue = new RequestQueue((stockCount) => {
-            return Math.min((stockCount || 0) + 5, 30);
-        });
-    }
-
-    buildHeaders() {
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
-            'Referer': 'https://www.google.com/'
-        };
-        if (this.config.COOKIES) {
-            headers['Cookie'] = this.config.COOKIES;
-        }
-        return headers;
-    }
-
-    async fetchWithRetry(url, maxRetries = CONFIG.REQUEST_RETRY_COUNT) {
-        return this.queue.add(async () => {
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
-                try {
-                    const req = new Request(url);
-                    req.headers = this.buildHeaders();
-                    req.timeoutInterval = CONFIG.REQUEST_TIMEOUT / 1000;
-                    return await req.loadString();
-                } catch (error) {
-                    if (attempt === maxRetries - 1) throw error;
-                    await this.delay(Math.pow(2, attempt) * 1000);
-                }
-            }
-        });
-    }
-
-    async delay(ms) {
-        if (ms <= 0) return;
-        const start = Date.now();
-        while (Date.now() - start < ms) {
-            // 空循環等待
-        }
-    }
-
-    async fetchJson(url, context) {
-        try {
-            const html = await this.fetchWithRetry(url);
-            const data = JSON.parse(html);
-            if (data.code !== 0) {
-                throw new Error(`Lbkrs API 錯誤: ${data.message || '未知錯誤'}`);
-            }
-            return data;
-        } catch (e) {
-            saveDebugFile(`debug_${context}_error.txt`, `URL: ${url}\nError: ${e.message}`);
-            throw new Error(`${context} API 請求失敗: ${e.message}`);
-        }
-    }
-}
-
-/**
- * Lbkrs Endpoint Registry + Client
- * 負責集中管理 URL/Query 組裝與原始 JSON 取得
- */
-class LbkrsClient {
-    constructor(config) {
-        this.config = config;
-        this.fetcher = new DataFetcher(config);
-        this.base = config.MARKET_URLS.BASE;
-        this.paths = {
-            ranking: config.MARKET_URLS.RANKING_PATH,
-            detail: config.MARKET_URLS.DETAIL_PATH
-        };
-        this.defaultRankingQuery = {
-            key: 'all',
-            indicators: [
-                'last_done',
-                'chg',
-                'change',
-                'total_amount',
-                'total_balance',
-                'turnover_rate',
-                'amplitude',
-                'volume_rate',
-                'depth_rate',
-                'pb_ttm',
-                'market_cap',
-                'five_min_chg',
-                'five_day_chg',
-                'ten_day_chg',
-                'twenty_day_chg',
-                'this_year_chg',
-                'half_year_chg',
-                'industry'
-            ],
-            sort_indicator: 'total_balance',
-            order: 'desc',
-            offset: 0,
-            limit: 40
-        };
-    }
-
-    buildUrl(path, query, extraIndicators = []) {
-        const parts = [];
-
-        if (query) {
-            Object.keys(query).forEach(key => {
-                const value = query[key];
-                if (value === undefined || value === null) return;
-
-                if (key === 'indicators' && Array.isArray(value)) {
-                    value.concat(extraIndicators).forEach(ind => {
-                        parts.push(`indicators[]=${encodeURIComponent(ind)}`);
-                    });
-                } else {
-                    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
-                }
-            });
-        }
-
-        const qs = parts.length ? `?${parts.join('&')}` : '';
-        return `${this.base}${path}${qs}`;
-    }
-
-    /**
-     * 取得成交額排行榜原始 list
-     * @param {'US'|'HK'} market
-     * @returns {Promise<Array>}
-     */
-    async getRankingList(market) {
-        const query = {
-            ...this.defaultRankingQuery,
-            market
-        };
-
-        const url = this.buildUrl(this.paths.ranking, query);
-        const data = await this.fetcher.fetchJson(url, `ranking_${market}`);
-
-        if (!data?.data?.list || !Array.isArray(data.data.list)) {
-            throw new Error(`${market} 排行榜數據格式錯誤`);
-        }
-
-        return data.data.list;
-    }
-
-    /**
-     * 依 counterId 取得 Detail 原始資料
-     * @param {string} counterId
-     * @param {string} context
-     */
-    async getDetailByCounterId(counterId, context) {
-        const query = { counter_id: counterId };
-        const url = this.buildUrl(this.paths.detail, query);
-        const data = await this.fetcher.fetchJson(url, context || `detail_${counterId}`);
-
-        if (!data?.data) {
-            throw new Error(`Detail API 數據格式錯誤 (${counterId})`);
-        }
-
-        return data.data;
-    }
-
-    /**
-     * 供舊邏輯使用的兼容方法：模擬舊 fetchLbkrsDetailData 簽名
-     */
-    async fetchLbkrsDetailData(counterId, context) {
-        const detailData = await this.getDetailByCounterId(counterId, context);
-        return { code: 0, data: detailData };
-    }
-
-    /**
-     * 獲取 K 線歷史數據
-     * @param {string} counterId 
-     * @param {number} lineNum 
-     * @param {number} lineType 
-     */
-    async getKlineHistory(counterId, lineNum = 250, lineType = 1000) {
-        const query = {
-            counter_id: counterId,
-            line_num: lineNum,
-            line_type: lineType
-        };
-
-        const url = this.buildUrl(this.config.MARKET_URLS.KLINE_PATH.replace(this.base, ''), query);
-        // 注意：buildUrl 會自動加上 base，這裡 KLINE_PATH 如果是相對路徑則不需要 replace，
-        // 但 CONFIG 中定義的是 '/api/...', buildUrl 會拼在 base 後面。
-        // 修正：buildUrl 的 path 參數應該是相對路徑。
-        // 檢查 CONFIG: KLINE_PATH: '/api/forward/v3/quote/kline' -> 正確
-
-        const data = await this.fetcher.fetchJson(url, `kline_history_${counterId}`);
-
-        if (!data?.data?.klines) {
-            throw new Error(`K線歷史數據格式錯誤 (${counterId})`);
-        }
-
-        return data.data.klines;
-    }
-}
-
-// ==================== 核心類別：色彩計算器 ====================
-class ColorCalculator {
-    constructor(config) {
-        this.config = config;
-        this.cache = new Map();
-    }
-
-    getChangeRatioColor(ratio) {
-        const key = `change_${ratio.toFixed(2)}`;
-        if (this.cache.has(key)) return this.cache.get(key);
-
-        const color = this.calculateChangeRatioColor(ratio);
-        this.cache.set(key, color);
-        return color;
-    }
-
-    calculateChangeRatioColor(ratio) {
-        const { GAIN_LEVELS, LOSS_LEVELS, NEUTRAL } = this.config.COLORS;
-
-        if (ratio > 5) return new Color(GAIN_LEVELS.level5);
-        if (ratio > 3) return new Color(GAIN_LEVELS.level4);
-        if (ratio > 1.5) return new Color(GAIN_LEVELS.level3);
-        if (ratio > 0.5) return new Color(GAIN_LEVELS.level2);
-        if (ratio > 0) return new Color(GAIN_LEVELS.level1);
-
-        if (ratio < -5) return new Color(LOSS_LEVELS.level5);
-        if (ratio < -3) return new Color(LOSS_LEVELS.level4);
-        if (ratio < -1.5) return new Color(LOSS_LEVELS.level3);
-        if (ratio < -0.5) return new Color(LOSS_LEVELS.level2);
-        if (ratio < 0) return new Color(LOSS_LEVELS.level1);
-
-        return new Color(NEUTRAL);
-    }
-
-    getVolumeRatioColor(ratio) {
-        const key = `volume_${ratio.toFixed(2)}`;
-        if (this.cache.has(key)) return this.cache.get(key);
-
-        const color = this.calculateVolumeRatioColor(ratio);
-        this.cache.set(key, color);
-        return color;
-    }
-
-    calculateVolumeRatioColor(ratio) {
-        const t = this.config.VOLUME_RATIO_THRESHOLDS;
-        const c = this.config.VOLUME_RATIO_COLORS;
-        const capped = Math.min(ratio, t.MAX_CAP);
-
-        if (capped < t.COLDEST) return new Color(c.coldest);
-        if (capped < t.COLD) return this.interpolate(c.coldest, c.cold, (capped - 0) / (t.COLD - 0));
-        if (capped < t.WARM) return this.interpolate(c.cold, c.warm, (capped - t.COLD) / (t.WARM - t.COLD));
-        if (capped < t.HOT) return this.interpolate(c.warm, c.hot, (capped - t.WARM) / (t.HOT - t.WARM));
-        return this.interpolate(c.hot, c.hottest, (capped - t.HOT) / (t.MAX_CAP - t.HOT));
-    }
-
-    interpolate(hex1, hex2, ratio) {
+    static interpolate(hex1, hex2, ratio) {
         const c1 = this.hexToRgb(hex1);
         const c2 = this.hexToRgb(hex2);
         const r = Math.round(c1.r + (c2.r - c1.r) * ratio);
@@ -985,949 +260,747 @@ class ColorCalculator {
         return new Color(this.rgbToHex(r, g, b));
     }
 
-    hexToRgb(hex) {
+    static hexToRgb(hex) {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-        } : { r: 0, g: 0, b: 0 };
+        return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : { r: 0, g: 0, b: 0 };
     }
 
-    rgbToHex(r, g, b) {
+    static rgbToHex(r, g, b) {
         return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
     }
 }
 
-// ==================== 核心類別：MA 計算器 ====================
-class MACalculator {
-    /**
-     * 計算移動平均線
-     * @param {Array<number>} prices - 收盤價數組
-     * @param {number} days - 天數
-     * @returns {number|null} MA值
-     */
-    static calculateMA(prices, days) {
-        if (!prices || prices.length < days) return null;
+// ==================== 3. 網絡層 (Network Layer) ====================
 
-        // 取最近 days 天的數據
-        const targetPrices = prices.slice(-days);
-        const sum = targetPrices.reduce((acc, p) => acc + p, 0);
+class HttpClient {
+    constructor() {
+        this.activeRequests = 0;
+        this.queue = [];
+        this.maxConcurrent = CONFIG.MAX_CONCURRENT_REQUESTS;
+    }
+
+    async get(url, context) {
+        return this.enqueue(async () => {
+            return this.fetchWithRetry(url, context);
+        });
+    }
+
+    async enqueue(task) {
+        if (this.activeRequests >= this.maxConcurrent) {
+            await new Promise(resolve => this.queue.push(resolve));
+        }
+        this.activeRequests++;
+        try {
+            return await task();
+        } finally {
+            this.activeRequests--;
+            if (this.queue.length > 0) {
+                const next = this.queue.shift();
+                next();
+            }
+        }
+    }
+
+    async fetchWithRetry(url, context, retries = CONFIG.REQUEST_RETRY_COUNT) {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const req = new Request(url);
+                req.timeoutInterval = CONFIG.REQUEST_TIMEOUT / 1000;
+                req.headers = {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
+                    ...(CONFIG.COOKIES ? { 'Cookie': CONFIG.COOKIES } : {})
+                };
+                const json = await req.loadJSON();
+                if (json.code !== 0) throw new Error(json.message || 'API Error');
+                return json;
+            } catch (e) {
+                Logger.debug(`${context} retry ${i + 1}/${retries}: ${e.message}`);
+                if (i === retries - 1) throw e;
+                await Utils.sleep(1000 * Math.pow(2, i)); // 指數退避
+            }
+        }
+    }
+}
+
+class LbkrsApi {
+    constructor() {
+        this.http = new HttpClient();
+    }
+
+    buildUrl(path, query) {
+        const qs = Object.entries(query)
+            .filter(([_, v]) => v !== undefined && v !== null)
+            .map(([k, v]) => {
+                if (Array.isArray(v)) return v.map(i => `${k}[]=${encodeURIComponent(i)}`).join('&');
+                return `${k}=${encodeURIComponent(v)}`;
+            })
+            .join('&');
+        return `${CONFIG.API.BASE}${path}?${qs}`;
+    }
+
+    async getRanking(market) {
+        const query = {
+            market,
+            key: 'all',
+            indicators: ['last_done', 'chg', 'total_balance', 'volume_rate', 'industry'],
+            sort_indicator: 'total_balance',
+            order: 'desc',
+            limit: 40
+        };
+        const url = this.buildUrl(CONFIG.API.ENDPOINTS.RANKING, query);
+        const res = await this.http.get(url, `Ranking-${market}`);
+        return res.data.list;
+    }
+
+    async getDetail(counterId) {
+        const url = this.buildUrl(CONFIG.API.ENDPOINTS.DETAIL, { counter_id: counterId });
+        const res = await this.http.get(url, `Detail-${counterId}`);
+        return res.data;
+    }
+
+    async getHistory(counterId, days = 201) {
+        // 注意：KLINE endpoint 在 CONFIG 中是完整路徑，但 buildUrl 會拼在 BASE 後
+        // 這裡做個特殊處理或修正 CONFIG。假設 CONFIG 路徑是相對的。
+        const url = this.buildUrl(CONFIG.API.ENDPOINTS.KLINE, {
+            counter_id: counterId,
+            line_num: days,
+            line_type: 1000 // 日K
+        });
+        const res = await this.http.get(url, `History-${counterId}`);
+        return res.data.klines;
+    }
+}
+
+// ==================== 4. 領域層 (Domain Layer) ====================
+
+class TechnicalIndicators {
+    static calculateMA(prices, days) {
+        if (prices.length < days) return null;
+        const sum = prices.slice(-days).reduce((a, b) => a + b, 0);
         return sum / days;
     }
 
-    /**
-     * 計算乖離率
-     * @param {number} currentPrice 
-     * @param {number} maValue 
-     * @returns {number} 乖離率百分比
-     */
-    static calculateDeviation(currentPrice, maValue) {
-        if (!maValue) return null;
-        return ((currentPrice - maValue) / maValue) * 100;
+    static calculateRSI(prices, days = 6) {
+        if (prices.length < days + 1) return null;
+        let gains = 0, losses = 0;
+        for (let i = 1; i <= days; i++) {
+            const diff = prices[i] - prices[i - 1];
+            if (diff > 0) gains += diff;
+            else losses += Math.abs(diff);
+        }
+        const rs = gains / losses;
+        return losses === 0 ? 100 : 100 - (100 / (1 + rs));
     }
 }
 
-// ==================== 市場決策引擎 ====================
-/**
- * 自動判斷應顯示哪個市場
- */
-function resolveMarketAuto() {
-    const now = new Date();
+class Stock {
+    constructor(data) {
+        this.code = data.code;
+        this.name = data.name;
+        this.market = data.market;
+        this.type = data.type; // 'ST' or 'ETF'
+        this.price = data.price;
+        this.changePct = data.changePct;
+        this.turnover = data.turnover;
+        this.volumeRatio = data.volumeRatio;
+        this.industry = data.industry;
 
-    const ny = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const nyDay = ny.getDay();
-    const nyHour = ny.getHours();
-    const nyMin = ny.getMinutes();
-    const nyTime = nyHour * 60 + nyMin;
-
-    const hk = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Hong_Kong' }));
-    const hkDay = hk.getDay();
-    const hkHour = hk.getHours();
-    const hkMin = hk.getMinutes();
-    const hkTime = hkHour * 60 + hkMin;
-
-    const hkOpen = hkDay >= 1 && hkDay <= 5 && hkTime >= 9 * 60 + 30 && hkTime <= 16 * 60;
-    const usOpen = nyDay >= 1 && nyDay <= 5 && nyTime >= 9 * 60 + 30 && nyTime <= 16 * 60;
-
-    if (usOpen) return 'US';
-    if (hkOpen) return 'HK';
-
-    if (hkDay === 0 || hkDay === 6) return 'US';
-
-    // 維持收市後~另一股開市前 1 小時為同一市場
-    if (hkDay >= 1 && hkDay <= 5) {
-        if (hkTime > 16 * 60 && nyTime < 8 * 60 + 30) return 'HK';  // 港股收市後
-        if (nyTime > 4 * 60 && hkTime < 8 * 60 + 30) return 'US';   // 美股開市前
+        // 擴充數據
+        this.candle = null; // {open, high, low, close}
+        this.ma = {};       // { ma20: {value, dev}, ... }
+        this.rsi = null;    // { value, trend }
     }
 
-    return 'US';
+    get counterId() {
+        return Utils.buildCounterId(this.code, this.market, this.type);
+    }
 }
 
-/**
- * 智能雙模式決策
- */
-function resolveDisplayMode() {
-    const watchlist = CONFIG.CUSTOM_WATCHLIST;
+// ==================== 5. 服務層 (Service Layer) ====================
 
-    if (watchlist && watchlist.length > 0) {
-        console.log(`[模式] 自選模式 (${watchlist.length} 支股票)`);
-        return { mode: 'watchlist', market: 'AUTO' };
+class CacheService {
+    constructor() {
+        this.fm = FileManager.local();
+        this.root = this.fm.documentsDirectory();
     }
 
-    console.log(`[模式] 排行榜模式`);
-    const market = CONFIG.MARKET === 'AUTO' ? resolveMarketAuto() : CONFIG.MARKET;
-    return { mode: 'ranking', market };
+    getPath(key) { return this.fm.joinPath(this.root, `lbkrs_v3_${key}.json`); }
+
+    get(key, durationMinutes) {
+        const path = this.getPath(key);
+        if (!this.fm.fileExists(path)) return null;
+        try {
+            const data = JSON.parse(this.fm.readString(path));
+            const age = (Date.now() - data.ts) / (60 * 1000);
+            if (age > durationMinutes) return null;
+            return data.payload;
+        } catch (e) { return null; }
+    }
+
+    set(key, payload) {
+        const path = this.getPath(key);
+        this.fm.writeString(path, JSON.stringify({ ts: Date.now(), payload }));
+    }
 }
 
-// ==================== 資料抓取函式 ====================
-/**
- * 抓取排行榜數據（改用 LbkrsClient）
- */
-async function fetchRanking(client, market) {
-    const rawList = await client.getRankingList(market);
-    return rawList.map(item => StockDataMapper.fromRankingAPI(item));
-}
+class StockService {
+    constructor() {
+        this.api = new LbkrsApi();
+        this.cache = new CacheService();
+    }
 
-/**
- * 抓取自選股票數據（優化版）
- */
-async function fetchWatchlist(client, caches) {
-    const watchlist = CONFIG.CUSTOM_WATCHLIST;
-    console.log(`[自選] 開始獲取 ${watchlist.length} 支股票`);
+    async getStocks(mode, market) {
+        if (mode === 'watchlist') {
+            return this.getWatchlist();
+        }
+        return this.getRanking(market);
+    }
 
-    const concurrency = Math.min(watchlist.length + 5, 30);
-    const results = [];
-    const errors = [];
+    extractIndustry(rawIndustry, type, stockName) {
+        if (type === 'ETF') {
+            return stockName || 'ETF';
+        }
+        return (rawIndustry && rawIndustry.trim()) ? rawIndustry.trim() : '--';
+    }
 
-    const batchSize = Math.min(concurrency, 10);
-    for (let i = 0; i < watchlist.length; i += batchSize) {
-        const batch = watchlist.slice(i, i + batchSize);
-        const batchPromises = batch.map(async (stockCode) => {
-            try {
-                // 檢查快取
-                const cached = caches.watchlist.get(stockCode);
-                if (cached) {
-                    console.log(`[自選] 快取命中: ${stockCode}`);
-                    return cached;
-                }
+    calculateChangePercent(data, currentPrice) {
+        const prevClose = parseFloat(data.prev_close);
+        if (prevClose && prevClose > 0) {
+            return ((currentPrice - prevClose) / prevClose) * 100;
+        }
+        return (parseFloat(data.chg) || 0) * 100;
+    }
 
-                // 識別市場
-                const market = CounterIdHelper.identifyMarket(stockCode);
+    async getRanking(market) {
+        const cacheKey = `ranking_${market}`;
+        const cached = this.cache.get(cacheKey, CONFIG.CACHE_DURATION);
+        if (cached) return cached.map(d => new Stock(d));
 
-                // 多輪嘗試獲取數據
-                const result = await tryFetchStock(stockCode, market, client);
-
-                // 映射為標準格式
-                const mappedData = StockDataMapper.fromDetailAPI(result.data, result.counterId);
-
-                // 寫入快取
-                caches.watchlist.set(stockCode, mappedData);
-
-                console.log(`[自選] 成功: ${stockCode}`);
-                return mappedData;
-
-            } catch (error) {
-                console.error(`[自選] 失敗: ${stockCode} - ${error.message}`);
-                errors.push({ stockCode, error: error.message });
-                return null;
-            }
+        const list = await this.api.getRanking(market);
+        const stocks = list.map(item => {
+            const cid = Utils.parseCounterId(item.counter_id);
+            return new Stock({
+                code: cid.code,
+                name: item.name,
+                market: cid.market,
+                type: cid.type,
+                price: parseFloat(item.indicators[0]),
+                changePct: parseFloat(item.indicators[1]) * 100,
+                turnover: item.indicators[2], // total_balance
+                volumeRatio: parseFloat(item.indicators[3]),
+                industry: this.extractIndustry(item.indicators[4], cid.type, item.name)
+            });
         });
 
-        const batchResults = await Promise.all(batchPromises);
-        results.push(...batchResults.filter(r => r !== null));
-
-        if (i + batchSize < watchlist.length) {
-            await fetcher.delay(100);
-        }
+        // 序列化儲存
+        this.cache.set(cacheKey, stocks);
+        return stocks;
     }
 
-    console.log(`[自選] 完成: ${results.length} 成功, ${errors.length} 失敗`);
-    return results;
-}
+    async getWatchlist() {
+        const codes = CONFIG.CUSTOM_WATCHLIST || [];
+        if (codes.length === 0) return [];
 
-/**
- * 多輪嘗試獲取股票數據
- */
-async function tryFetchStock(stockCode, market, client) {
-    const attempts = [
-        { type: 'ST', label: '股票' },
-        { type: 'ETF', label: 'ETF' }
-    ];
-
-    if (market === 'US') {
-        attempts.push({ type: 'ST', label: '股票(備用)', format: true });
-    }
-
-    let lastError = null;
-
-    for (let i = 0; i < attempts.length; i++) {
-        const { type, label } = attempts[i];
-        try {
-            const counterId = CounterIdHelper.build(stockCode, market, type);
-            console.log(`[重試] ${i + 1}/${attempts.length} (${label}): ${counterId}`);
-
-            const detail = await client.getDetailByCounterId(counterId, `stock_${stockCode}`);
-
-            if (detail) {
-                console.log(`[重試] 成功: ${counterId}`);
-                return { data: detail, counterId };
-            }
-        } catch (error) {
-            console.log(`[重試] 失敗 ${i + 1}/${attempts.length}: ${error.message}`);
-            lastError = error;
-        }
-    }
-
-    throw new Error(`所有嘗試失敗: ${lastError?.message || '未知錯誤'}`);
-}
-
-/**
- * 過濾數據
- */
-function filterData(stockList) {
-    return stockList
-        .filter(stock =>
-            (CONFIG.SHOW_STOCK && stock.instrumentType === 3) ||
-            (CONFIG.SHOW_ETF && stock.instrumentType === 4)
-        )
-        .slice(0, CONFIG.MAX_ITEMS)
-        .map((stock, index) => ({
-            ...stock,
-            rank: index + 1
-        }));
-}
-
-/**
- * 補充 K線數據
- */
-async function enrichData(data, client, caches, market, mode) {
-    const visibleColumns = getColumns(market, mode).filter(c => c.visible);
-    const needsKline = visibleColumns.some(col => col.key === 'kline');
-
-    if (!needsKline) {
-        console.log(`[優化] 不需要 K線數據`);
-        return data;
-    }
-
-    console.log(`[K線] 開始獲取 ${data.length} 支股票的 K線數據`);
-
-    return Promise.all(data.map(async (stock) => {
-        // 1. 獲取 K線數據 (用於 Sparkline)
-        const klineData = await KlineDataProcessor.fetch(stock, client, caches);
-
-        // 2. 判斷是否需要歷史數據（MA 或 RSI）
-        const needsMA = visibleColumns.some(col => col.key === 'ma');
-        const needsRSI = visibleColumns.some(col => col.key === 'rsi');
-
-        let maData = null;
-        let rsiData = null;
-
-        // ⚡ 性能優化：只在需要時查詢一次歷史數據
-        if (needsMA || needsRSI) {
+        // 並行獲取，保持順序
+        const results = await Promise.all(codes.map(async (code) => {
             try {
-                const market = CounterIdHelper.identifyMarket(stock.stockCode);
-                const instrumentType = stock.instrumentType === 4 ? 'ETF' : 'ST';
-                const counterId = CounterIdHelper.build(stock.stockCode, market, instrumentType);
+                const market = Utils.identifyMarket(code);
+                // 嘗試 ST, ETF
+                let data, type = 'ST';
+                try {
+                    data = await this.api.getDetail(Utils.buildCounterId(code, market, 'ST'));
+                } catch {
+                    type = 'ETF';
+                    data = await this.api.getDetail(Utils.buildCounterId(code, market, 'ETF'));
+                }
 
-                // 一次查詢，201 天足夠計算 200MA 和 RSI
-                const history = await client.getKlineHistory(counterId, 201);
+                return new Stock({
+                    code: code,
+                    name: data.stock_name,
+                    market: market,
+                    type: type,
+                    price: parseFloat(data.last_done),
+                    changePct: this.calculateChangePercent(data, parseFloat(data.last_done)),
+                    turnover: data.total_balance || data.balance,
+                    volumeRatio: parseFloat(data.volume_rate),
+                    industry: this.extractIndustry(data.industry_name, type, data.stock_name)
+                });
+            } catch (e) {
+                Logger.error(`Watchlist ${code} failed: ${e.message}`);
+                return null;
+            }
+        }));
 
-                if (history && history.length > 0) {
-                    // ⚡ 性能優化：預先解析收盤價，避免 MA 和 RSI 重複解析
-                    const prices = history.map(k => parseFloat(k.close));
+        return results.filter(s => s !== null);
+    }
 
-                    // 3. 計算 MA（如果需要）
-                    if (needsMA) {
-                        maData = {};
-                        CONFIG.MA_CONFIG.DAYS.forEach(day => {
-                            const ma = MACalculator.calculateMA(prices, day);
-                            const deviation = MACalculator.calculateDeviation(stock.currentPrice, ma);
-                            maData[`ma${day}`] = {
-                                value: ma,
-                                deviation: deviation
-                            };
-                        });
-                    }
+    /**
+     * 統一數據補充邏輯 (Unified Fetching)
+     * 根據需要的欄位決定抓取策略
+     */
+    async enrichStocks(stocks, columns) {
+        const needsMA = columns.some(c => c.key === 'ma' && c.visible);
+        const needsRSI = columns.some(c => c.key === 'rsi' && c.visible);
+        const needsCandle = columns.some(c => c.key === 'candle' && c.visible);
 
-                    // 4. 計算 RSI（如果需要）
-                    if (needsRSI) {
-                        const rsiResult = RSICalculator.calculateRSI(prices, CONFIG.RSI_CONFIG.DAYS);
+        if (!needsMA && !needsRSI && !needsCandle) return stocks;
 
-                        if (rsiResult) {
-                            const trend = rsiResult.current > rsiResult.previous ? 'up' : 'down';
-                            rsiData = {
-                                value: rsiResult.current,
-                                trend: trend
+        Logger.log(`Enriching ${stocks.length} stocks (MA:${needsMA}, RSI:${needsRSI}, Candle:${needsCandle})`);
+
+        const tasks = stocks.map(async (stock) => {
+            // 策略 1: 如果需要 MA 或 RSI，必須抓 History (201天)
+            // History 包含最新一天的 O/H/L/C，所以也滿足 Candle 需求
+            if (needsMA || needsRSI) {
+                try {
+                    const klines = await this.fetchHistoryWithCache(stock);
+                    if (klines && klines.length > 0) {
+                        const prices = klines.map(k => parseFloat(k.close));
+
+                        // 計算 MA
+                        if (needsMA) {
+                            CONFIG.MA_CONFIG.DAYS.forEach(day => {
+                                const val = TechnicalIndicators.calculateMA(prices, day);
+                                if (val) {
+                                    stock.ma[`ma${day}`] = {
+                                        value: val,
+                                        deviation: ((stock.price - val) / val) * 100
+                                    };
+                                }
+                            });
+                        }
+
+                        // 計算 RSI
+                        if (needsRSI) {
+                            const rsiNow = TechnicalIndicators.calculateRSI(prices, CONFIG.RSI_CONFIG.DAYS);
+                            const rsiPrev = TechnicalIndicators.calculateRSI(prices.slice(0, -1), CONFIG.RSI_CONFIG.DAYS);
+                            if (rsiNow !== null) {
+                                stock.rsi = { value: rsiNow, trend: rsiNow >= rsiPrev ? 'up' : 'down' };
+                            }
+                        }
+
+                        // 填充 Candle (使用最後一筆)
+                        if (needsCandle) {
+                            const last = klines[klines.length - 1];
+                            stock.candle = {
+                                open: parseFloat(last.open),
+                                high: parseFloat(last.high),
+                                low: parseFloat(last.low),
+                                close: parseFloat(last.close)
                             };
                         }
                     }
+                } catch (e) {
+                    Logger.debug(`History failed for ${stock.code}: ${e.message}`);
                 }
-            } catch (e) {
-                console.error(`[指標] ${stock.stockCode} 計算失敗: ${e.message}`);
             }
-        }
-
-        return {
-            ...stock,
-            klineData,
-            maData,
-            rsiData
-        };
-    }));
-}
-
-// ==================== Widget 建構引擎 ====================
-/**
- * 獲取當前欄位設定
- */
-function getColumns(market, mode) {
-    let columns;
-    if (mode === 'watchlist') {
-        columns = CONFIG.COLUMN_SETTINGS_MIXED;
-    } else {
-        columns = market === 'HK' ? CONFIG.COLUMN_SETTINGS_HK : CONFIG.COLUMN_SETTINGS_US;
-    }
-
-    // 動態計算 MA 欄位寬度 (每增加一天 +12px)
-    return columns.map(col => {
-        if (col.key === 'ma') {
-            return {
-                ...col,
-                width: CONFIG.MA_CONFIG.DAYS.length * 12
-            };
-        }
-        return col;
-    });
-}
-
-/**
- * 建立完整 Widget
- */
-async function createWidget(stockData, updateTime, maxTurnover, colorCalc, market, mode) {
-    const widget = new ListWidget();
-    widget.backgroundColor = CONFIG.COLORS.background;
-    widget.spacing = 0;
-    widget.setPadding(0, 0, 0, 0);
-
-    const visibleColumns = getColumns(market, mode).filter(c => c.visible);
-
-    createHeaderRow(widget, updateTime, visibleColumns);
-
-    const totalBarWidth = visibleColumns.reduce((sum, col) => sum + col.width, 0);
-
-    for (const stock of stockData) {
-        createDataRow(widget, stock, maxTurnover, totalBarWidth, visibleColumns, colorCalc, mode);
-    }
-
-    return widget;
-}
-
-/**
- * 建立標題列
- */
-function createHeaderRow(widget, updateTime, columns) {
-    const timeFormatter = new DateFormatter();
-    timeFormatter.dateFormat = 'HH:mm';
-    const timeString = timeFormatter.string(updateTime);
-
-    const headerRow = widget.addStack();
-    headerRow.layoutHorizontally();
-    const p = CONFIG.UI.HEADER_PADDING;
-    headerRow.setPadding(p.top, p.left, p.bottom, p.right);
-    headerRow.backgroundColor = CONFIG.COLORS.headerBackground;
-
-    columns.forEach(col => {
-        const colStack = headerRow.addStack();
-        colStack.size = new Size(col.width, 0);
-
-        const headerText = col.key === 'industry' ? timeString : col.header;
-        const colHeader = colStack.addText(headerText);
-        colHeader.font = Font.boldSystemFont(CONFIG.FONT_SIZE);
-        colHeader.textColor = CONFIG.COLORS.text;
-    });
-}
-
-/**
- * 建立數據列
- */
-function createDataRow(widget, stock, maxTurnover, totalBarWidth, columns, colorCalc, mode) {
-    const rowContainer = widget.addStack();
-    rowContainer.layoutVertically();
-    const p = CONFIG.UI.ROW_PADDING;
-    rowContainer.setPadding(p.top, p.left, p.bottom, p.right);
-
-    const rowStack = rowContainer.addStack();
-    rowStack.layoutHorizontally();
-    rowStack.centerAlignContent();
-
-    const rowColor = colorCalc.getChangeRatioColor(stock.changePercent);
-
-    columns.forEach(col => {
-        addColumnCell(rowStack, col, stock, rowColor, colorCalc, mode);
-    });
-
-    addProgressBar(rowContainer, stock, maxTurnover, totalBarWidth, rowColor);
-}
-
-/**
- * 新增欄位儲存格
- */
-function addColumnCell(rowStack, col, stock, rowColor, colorCalc, mode) {
-    const colStack = rowStack.addStack();
-    colStack.size = new Size(col.width, 0);
-    colStack.centerAlignContent();
-
-    if (col.key === 'kline') {
-        drawKline(colStack, stock.klineData, CONFIG.KLINE);
-        return;
-    }
-
-    if (col.key === 'ma') {
-        drawMATriangle(colStack, stock.maData);
-        return;
-    }
-
-    if (col.key === 'rsi') {
-        drawRSI(colStack, stock.rsiData);
-        return;
-    }
-
-    const value = formatValue(col.key, stock, mode);
-    addTextCell(colStack, value, col.key, stock, rowColor, colorCalc);
-}
-
-/**
- * 格式化欄位值
- */
-function formatValue(key, stock, mode) {
-    switch (key) {
-        case 'stockCode':
-            return CounterIdHelper.formatStockCode(stock.stockCode,
-                CounterIdHelper.identifyMarket(stock.stockCode));
-
-        case 'stockName':
-            return stock.stockName || '--';
-
-        case 'stockDisplay':
-            if (mode === 'watchlist') {
-                const isHK = /^\d+$/.test(stock.stockCode);
-                return isHK ? (stock.stockName || stock.stockCode) : stock.stockCode;
+            // 策略 2: 只需要 Candle，不需要歷史
+            else if (needsCandle) {
+                // 如果是 Watchlist 模式，Detail API 可能已經有數據了 (但我們在 getWatchlist 只取了基礎)
+                // 為了簡單，這裡統一抓取 History(1天) 或者 Detail
+                // 抓 History(1) 比較輕量且統一
+                try {
+                    const klines = await this.api.getHistory(stock.counterId, 1);
+                    if (klines && klines.length > 0) {
+                        const last = klines[0];
+                        stock.candle = {
+                            open: parseFloat(last.open),
+                            high: parseFloat(last.high),
+                            low: parseFloat(last.low),
+                            close: parseFloat(last.close)
+                        };
+                    }
+                } catch (e) {
+                    Logger.debug(`Candle failed for ${stock.code}: ${e.message}`);
+                }
             }
-            return stock.stockCode;
+        });
 
-        case 'currentPrice':
-            return stock.currentPrice.toFixed(2);
+        await Promise.all(tasks);
+        return stocks;
+    }
 
-        case 'tradeTurnover':
-            return formatTurnover(stock.tradeTurnover);
+    async fetchHistoryWithCache(stock) {
+        const key = `history_${stock.code}`;
+        const cached = this.cache.get(key, CONFIG.HISTORY_CACHE_DURATION);
+        if (cached) return cached;
 
-        case 'volumeRatio':
-            return stock.volumeRatio.toFixed(2);
-
-        default:
-            return String(stock[key] || '--');
+        const data = await this.api.getHistory(stock.counterId, 201);
+        if (data) this.cache.set(key, data);
+        return data;
     }
 }
 
-/**
- * 新增文字儲存格
- */
-function addTextCell(colStack, value, key, stock, rowColor, colorCalc) {
-    const colText = colStack.addText(String(value));
-    colText.font = Font.mediumSystemFont(CONFIG.FONT_SIZE);
-    colText.textColor = key === 'volumeRatio'
-        ? colorCalc.getVolumeRatioColor(stock.volumeRatio)
-        : rowColor;
-    colText.lineLimit = 1;
-}
+// ==================== 6. UI 層 (UI Layer) ====================
 
-/**
- * 新增成交額比例線 (改進版)
- * @param {WidgetStack} rowContainer - 行容器
- * @param {Object} stock - 股票數據
- * @param {number} maxTurnover - 最高成交額
- * @param {number} totalBarWidth - 總欄位寬度
- * @param {Color} rowColor - 行顏色
- */
-function addProgressBar(rowContainer, stock, maxTurnover, totalBarWidth, rowColor) {
-    // 計算成交額比例
-    const currentTurnover = parseTurnoverToNumber(stock.tradeTurnover);
+class Painters {
+    static drawCandle(stack, candle) {
+        if (!candle) { stack.addSpacer(); return; }
+        const { WIDTH, HEIGHT, SHADOW_WIDTH, COLORS } = CONFIG.KLINE_CONFIG;
+        const { open, high, low, close } = candle;
 
-    // 處理無效數據
-    if (maxTurnover <= 0 || currentTurnover <= 0) {
-        addMinimalBar(rowContainer, totalBarWidth);
-        return;
+        const color = new Color(close >= open ? COLORS.GAIN : COLORS.LOSS);
+        const ctx = new DrawContext();
+        ctx.size = new Size(WIDTH, HEIGHT);
+        ctx.opaque = false;
+        ctx.respectScreenScale = true;
+
+        const range = Math.max(high - low, 0.01);
+        const getY = p => HEIGHT - ((p - low) / range) * HEIGHT;
+
+        // 影線
+        const x = WIDTH / 2;
+        const path = new Path();
+        path.move(new Point(x, getY(high)));
+        path.addLine(new Point(x, getY(low)));
+        ctx.setStrokeColor(color);
+        ctx.setLineWidth(SHADOW_WIDTH);
+        ctx.addPath(path);
+        ctx.strokePath();
+
+        // 實體
+        const bodyTop = Math.min(getY(open), getY(close));
+        const bodyH = Math.max(Math.abs(getY(open) - getY(close)), 1);
+        ctx.setFillColor(color);
+        ctx.fillRect(new Rect(0, bodyTop, WIDTH, bodyH));
+
+        const img = stack.addImage(ctx.getImage());
+        img.imageSize = new Size(WIDTH, HEIGHT);
+        img.centerAlignImage();
     }
 
-    // 計算比例 (0-1之間)
-    const ratio = Math.min(currentTurnover / maxTurnover, 1);
+    static drawMA(stack, maData) {
+        const { DAYS, TRIANGLE, COLORS } = CONFIG.MA_CONFIG;
+        const width = DAYS.length * 12;
+        const height = 14;
+        const itemWidth = 12;
 
-    // 計算線條寬度 (使用新配置)
-    const barWidth = Math.max(totalBarWidth * ratio, CONFIG.UI.TURNOVER_BAR.MIN_WIDTH);
-
-    // 建立線條容器
-    const barContainer = rowContainer.addStack();
-    barContainer.size = new Size(totalBarWidth, CONFIG.UI.PROGRESS_BAR_HEIGHT);
-    barContainer.backgroundColor = new Color("#888888", CONFIG.UI.TURNOVER_BAR.BACKGROUND_OPACITY);
-
-    if (barWidth >= CONFIG.UI.TURNOVER_BAR.MIN_WIDTH) {
-        // 繪製成交額線條
-        const progressBar = barContainer.addStack();
-        progressBar.size = new Size(barWidth, CONFIG.UI.PROGRESS_BAR_HEIGHT);
-        progressBar.backgroundColor = rowColor;
-        progressBar.cornerRadius = 0;
-
-        // 添加右側間距
-        barContainer.addSpacer();
-    }
-}
-
-/**
- * 繪製最小線條 (用於無成交額數據)
- * @param {WidgetStack} rowContainer - 行容器
- * @param {number} totalBarWidth - 總欄位寬度
- */
-function addMinimalBar(rowContainer, totalBarWidth) {
-    const barContainer = rowContainer.addStack();
-    barContainer.size = new Size(totalBarWidth, CONFIG.UI.PROGRESS_BAR_HEIGHT);
-    barContainer.backgroundColor = new Color("#888888", CONFIG.UI.TURNOVER_BAR.BACKGROUND_OPACITY);
-
-    const minimalBar = barContainer.addStack();
-    minimalBar.size = new Size(2, CONFIG.UI.PROGRESS_BAR_HEIGHT);
-    minimalBar.backgroundColor = new Color("#CCCCCC", CONFIG.UI.TURNOVER_BAR.MINIMAL_BAR_OPACITY);
-    barContainer.addSpacer();
-}
-
-/**
- * 繪製 K 線圖
- */
-function drawKline(colStack, klineData, config) {
-    if (!klineData) {
-        colStack.addSpacer();
-        return;
-    }
-
-    const { open, high, low, close } = klineData;
-    const { WIDTH, HEIGHT, SHADOW_WIDTH, GAIN_COLOR, LOSS_COLOR, NEUTRAL_COLOR } = config;
-
-    // 決定顏色
-    let colorHex;
-    if (close > open) {
-        colorHex = GAIN_COLOR;
-    } else if (close < open) {
-        colorHex = LOSS_COLOR;
-    } else {
-        colorHex = NEUTRAL_COLOR;
-    }
-    const color = new Color(colorHex);
-
-    // 使用 DrawContext 繪製
-    const ctx = new DrawContext();
-    ctx.size = new Size(WIDTH, HEIGHT);
-    ctx.opaque = false;
-    ctx.respectScreenScale = true;
-
-    // 座標計算 (Y軸向下，0為頂部)
-    // 防止除以零
-    const range = Math.max(high - low, 0.01);
-    // 將價格映射到高度 (high -> 0, low -> HEIGHT)
-    const getY = (price) => HEIGHT - ((price - low) / range) * HEIGHT;
-
-    const yHigh = getY(high);
-    const yLow = getY(low);
-    const yOpen = getY(open);
-    const yClose = getY(close);
-
-    // 1. 繪製影線 (Line)
-    const xCenter = WIDTH / 2;
-    const path = new Path();
-    path.move(new Point(xCenter, yHigh));
-    path.addLine(new Point(xCenter, yLow));
-    ctx.addPath(path);
-    ctx.setStrokeColor(color);
-    ctx.setLineWidth(SHADOW_WIDTH);
-    ctx.strokePath();
-
-    // 2. 繪製實體 (Rect)
-    const bodyTop = Math.min(yOpen, yClose);
-    // 確保實體至少有 1px 高度以便可見
-    const bodyHeight = Math.max(Math.abs(yOpen - yClose), 1);
-    const bodyRect = new Rect(0, bodyTop, WIDTH, bodyHeight);
-
-    ctx.setFillColor(color);
-    ctx.fillRect(bodyRect);
-
-    // 輸出圖片
-    const img = ctx.getImage();
-    const imgWidget = colStack.addImage(img);
-    imgWidget.imageSize = new Size(WIDTH, HEIGHT);
-    imgWidget.centerAlignImage();
-}
-
-/**
- * 繪製 MA 乖離率三角形
- * @param {WidgetStack} colStack 
- * @param {Object} maData - { ma20, ma50, ma200 } 每個包含 { deviation, trend }
- */
-function drawMATriangle(colStack, maData) {
-    if (!maData) {
-        const t = colStack.addText('-');
-        t.font = Font.systemFont(10);
-        t.textColor = new Color('#666666');
-        return;
-    }
-
-    const { TRIANGLE, COLORS, DAYS } = CONFIG.MA_CONFIG;
-    const width = DAYS.length * 12; // 動態寬度
-    const height = 14; // 行高
-
-    const ctx = new DrawContext();
-    ctx.size = new Size(width, height); // 水平排列，高度為單行
-    ctx.opaque = false;
-    ctx.respectScreenScale = true;
-
-    const itemWidth = 12; // 固定每個項目寬度
-
-    // 1. 收集有效的 MA 數據並排序以確定排名
-    const validMAs = [];
-    DAYS.forEach(day => {
-        const key = `ma${day}`;
-        const data = maData[key];
-        if (data && data.value !== null && data.value !== undefined) {
-            validMAs.push({ day, value: data.value });
-        }
-    });
-
-    // 按數值降序排序 (數值越大排名越前)
-    validMAs.sort((a, b) => b.value - a.value);
-
-    // 建立排名映射: day -> rank (0-indexed, 0 is highest)
-    const rankMap = new Map();
-    validMAs.forEach((item, index) => {
-        rankMap.set(item.day, index);
-    });
-
-    const totalRanks = validMAs.length;
-    const blockHeight = totalRanks > 0 ? height / totalRanks : 0;
-
-    DAYS.forEach((day, index) => {
-        const key = `ma${day}`;
-        const data = maData[key];
-        // 計算中心座標 (水平排列)
-        const centerX = index * itemWidth + itemWidth / 2;
-        const centerY = height / 2;
-
-        // 繪製排名線條 (如果有排名且數量大於1)
-        if (totalRanks > 1 && rankMap.has(day)) {
-            const rank = rankMap.get(day);
-            const lineWidth = itemWidth; // 左右留白
-            const lineX = index * itemWidth;
-
-            // 最高 MA (Rank 0): 上方綠線
-            if (rank === 0) {
-                const path = new Path();
-                path.move(new Point(lineX, 1));
-                path.addLine(new Point(lineX + lineWidth, 1));
-                ctx.setStrokeColor(new Color(COLORS.GAIN));
-                ctx.setLineWidth(1);
-                ctx.addPath(path);
-                ctx.strokePath();
-            }
-
-            // 最低 MA (Rank N-1): 下方紅線
-            if (rank === totalRanks - 1) {
-                const path = new Path();
-                path.move(new Point(lineX, height - 1));
-                path.addLine(new Point(lineX + lineWidth, height - 1));
-                ctx.setStrokeColor(new Color(COLORS.LOSS));
-                ctx.setLineWidth(1);
-                ctx.addPath(path);
-                ctx.strokePath();
-            }
-        }
-
-        if (!data || data.deviation === null) {
-            // 繪製橫線表示無數據
-            const path = new Path();
-            path.move(new Point(centerX - 2, centerY));
-            path.addLine(new Point(centerX + 2, centerY));
-            ctx.setStrokeColor(new Color('#666666'));
-            ctx.setLineWidth(1);
-            ctx.addPath(path);
-            ctx.strokePath();
+        if (Object.keys(maData).length === 0) {
+            const t = stack.addText('-');
+            t.font = Font.systemFont(10);
+            t.textColor = new Color('#666');
             return;
         }
 
-        // 計算三角形大小 (線性映射)
-        const absDev = Math.abs(data.deviation);
-        const size = Math.min(
-            Math.max(absDev * TRIANGLE.SCALING_FACTOR + TRIANGLE.MIN_SIZE, TRIANGLE.MIN_SIZE),
-            TRIANGLE.MAX_SIZE
-        );
+        const ctx = new DrawContext();
+        ctx.size = new Size(width, height);
+        ctx.opaque = false;
+        ctx.respectScreenScale = true;
 
-        // 決定顏色和方向
-        const isUp = data.deviation > 0;
-        const color = isUp ? new Color(COLORS.GAIN) : new Color(COLORS.LOSS);
+        // 排名
+        const valid = DAYS.map(d => ({ d, val: maData[`ma${d}`]?.value }))
+            .filter(x => x.val)
+            .sort((a, b) => b.val - a.val); // 降序
 
-        // 繪製三角形
-        const halfSize = size / 2;
-        const path = new Path();
+        const rankMap = new Map();
+        valid.forEach((x, i) => rankMap.set(x.d, i));
 
-        if (isUp) {
-            // 向上三角形
-            path.move(new Point(centerX, centerY - halfSize));
-            path.addLine(new Point(centerX - halfSize, centerY + halfSize));
-            path.addLine(new Point(centerX + halfSize, centerY + halfSize));
-        } else {
-            // 向下三角形
-            path.move(new Point(centerX - halfSize, centerY - halfSize));
-            path.addLine(new Point(centerX + halfSize, centerY - halfSize));
-            path.addLine(new Point(centerX, centerY + halfSize));
-        }
-        path.closeSubpath();
+        DAYS.forEach((day, i) => {
+            const data = maData[`ma${day}`];
+            const cx = i * itemWidth + itemWidth / 2;
+            const cy = height / 2;
 
-        ctx.setFillColor(color);
-        ctx.addPath(path);
-        ctx.fillPath();
-    });
-
-    const img = ctx.getImage();
-    const imgWidget = colStack.addImage(img);
-    imgWidget.imageSize = new Size(width, height); // 縮放以適應
-    imgWidget.centerAlignImage();
-}
-
-/**
- * 繪製 RSI 指標（含趨勢三角形與漸層色）
- * @param {WidgetStack} colStack 
- * @param {Object} rsiData - { value, trend }
- */
-function drawRSI(colStack, rsiData) {
-    if (!rsiData || rsiData.value === null) {
-        const t = colStack.addText('-');
-        t.font = Font.systemFont(CONFIG.FONT_SIZE);
-        t.textColor = new Color('#666666');
-        return;
-    }
-
-    const { value, trend } = rsiData;
-
-    // 建立水平堆疊以分別設定三角形與數值的顏色
-    const rowStack = colStack.addStack();
-    rowStack.layoutHorizontally();
-    rowStack.centerAlignContent();
-
-    // 1. 三角形符號：使用 K 線升跌顏色
-    const arrow = trend === 'up' ? '▲' : '▼';
-    const arrowColor = trend === 'up'
-        ? new Color(CONFIG.KLINE.GAIN_COLOR)  // 綠色
-        : new Color(CONFIG.KLINE.LOSS_COLOR); // 紅色
-
-    const arrowText = rowStack.addText(arrow);
-    arrowText.font = Font.mediumSystemFont(8);  // 三角形字體大小 8
-    arrowText.textColor = arrowColor;
-    arrowText.lineLimit = 1;
-
-    // 2. RSI 數值：使用漸層色
-    const rsiValue = Math.max(0, Math.min(100, value));
-    const valueColor = rsiValue <= 50
-        ? interpolateColor(CONFIG.RSI_CONFIG.COLORS.WEAK, CONFIG.RSI_CONFIG.COLORS.NEUTRAL, rsiValue / 50)
-        : interpolateColor(CONFIG.RSI_CONFIG.COLORS.NEUTRAL, CONFIG.RSI_CONFIG.COLORS.STRONG, (rsiValue - 50) / 50);
-
-    const valueText = rowStack.addText(Math.round(value).toString());
-    valueText.font = Font.mediumSystemFont(CONFIG.FONT_SIZE);
-    valueText.textColor = valueColor;
-    valueText.lineLimit = 1;
-}
-
-/**
- * 線性插值計算顏色
- * @param {string} color1 - 起始顏色 (hex)
- * @param {string} color2 - 結束顏色 (hex)
- * @param {number} ratio - 比例 (0-1)
- * @returns {Color} 插值顏色
- */
-function interpolateColor(color1, color2, ratio) {
-    const hex1 = color1.replace('#', '');
-    const hex2 = color2.replace('#', '');
-
-    const r1 = parseInt(hex1.substring(0, 2), 16);
-    const g1 = parseInt(hex1.substring(2, 4), 16);
-    const b1 = parseInt(hex1.substring(4, 6), 16);
-
-    const r2 = parseInt(hex2.substring(0, 2), 16);
-    const g2 = parseInt(hex2.substring(2, 4), 16);
-    const b2 = parseInt(hex2.substring(4, 6), 16);
-
-    const r = Math.round(r1 + (r2 - r1) * ratio);
-    const g = Math.round(g1 + (g2 - g1) * ratio);
-    const b = Math.round(b1 + (b2 - b1) * ratio);
-
-    const toHex = (n) => n.toString(16).padStart(2, '0');
-    return new Color(`#${toHex(r)}${toHex(g)}${toHex(b)}`);
-}
-
-// ==================== Widget 布局建構 ====================*/
-/**
- * 建立錯誤 Widget
- */
-function createErrorWidget(errorMessage) {
-    const widget = new ListWidget();
-    widget.backgroundColor = new Color('#5A0000');
-    widget.setPadding(12, 12, 12, 12);
-
-    const title = widget.addText('⚠ Widget 錯誤');
-    title.font = Font.boldSystemFont(14);
-    title.textColor = Color.white();
-
-    widget.addSpacer(8);
-
-    const text = widget.addText(errorMessage);
-    text.font = Font.systemFont(11);
-    text.textColor = new Color('#FFDDDD');
-
-    return widget;
-}
-
-// ==================== 工具函式 ====================
-/**
- * 格式化成交額顯示
- */
-function formatTurnover(numStr) {
-    const value = parseTurnoverToNumber(numStr);
-    if (isNaN(value) || value === 0) return String(numStr);
-    if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B';
-    if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M';
-    if (value >= 1e3) return (value / 1e3).toFixed(2) + 'K';
-    return value.toFixed(2);
-}
-
-/**
- * 解析成交額字串為數字
- */
-function parseTurnoverToNumber(numStr) {
-    if (typeof numStr !== 'string') return parseFloat(numStr) || 0;
-    const num = parseFloat(numStr.replace(/,/g, ''));
-    if (isNaN(num)) return 0;
-    const upper = numStr.toUpperCase();
-    if (upper.includes('億')) return num * 1e8;
-    if (upper.includes('萬')) return num * 1e4;
-    if (upper.includes('B')) return num * 1e9;
-    if (upper.includes('M')) return num * 1e6;
-    if (upper.includes('K')) return num * 1e3;
-    return num;
-}
-
-/**
- * 儲存除錯檔案
- */
-function saveDebugFile(filename, content) {
-    try {
-        const fm = FileManager.local();
-        const path = fm.joinPath(fm.documentsDirectory(), filename);
-        fm.writeString(path, content);
-        console.log(`除錯檔案已儲存: ${filename}`);
-    } catch (e) {
-        console.error(`除錯檔案儲存失敗: ${e.message}`);
-    }
-}
-
-// ==================== 主程式 ====================
-async function main() {
-    const startTime = new Date();
-    console.log(`=== 程式開始: ${startTime.toLocaleString()} ===`);
-
-    try {
-        // 1. 模式決策
-        const { mode, market } = resolveDisplayMode();
-
-        // 2. 初始化組件
-        const client = new LbkrsClient(CONFIG);
-        const colorCalc = new ColorCalculator(CONFIG);
-        const caches = {
-            ranking: new RankingCache(CONFIG),
-            watchlist: new WatchlistCache(CONFIG),
-            kline: new KlineCache(CONFIG)
-        };
-
-        let stockData = [];
-        let timestamp = new Date();
-        let displayMarket = market;
-
-        // 3. 獲取數據
-        if (mode === 'watchlist') {
-            stockData = await fetchWatchlist(client, caches);
-            if (!stockData || stockData.length === 0) {
-                throw new Error('自選股票數據為空');
-            }
-        } else {
-            const resolvedMarket = market === 'AUTO' ? resolveMarketAuto() : market;
-            displayMarket = resolvedMarket;
-
-            let cachedData = caches.ranking.get(resolvedMarket);
-            if (!cachedData?.data?.length) {
-                const rawData = await fetchRanking(client, resolvedMarket);
-                if (!rawData || rawData.length === 0) {
-                    throw new Error('排行榜數據為空');
+            // 排名線
+            if (rankMap.has(day)) {
+                const rank = rankMap.get(day);
+                const lx = i * itemWidth;
+                if (rank === 0) { // 最高: 綠頂線
+                    const p = new Path();
+                    p.move(new Point(lx, 1)); p.addLine(new Point(lx + itemWidth, 1));
+                    ctx.setStrokeColor(new Color(COLORS.GAIN));
+                    ctx.setLineWidth(1); ctx.addPath(p); ctx.strokePath();
+                } else if (rank === valid.length - 1 && valid.length > 1) { // 最低: 紅底線
+                    const p = new Path();
+                    p.move(new Point(lx, height - 1)); p.addLine(new Point(lx + itemWidth, height - 1));
+                    ctx.setStrokeColor(new Color(COLORS.LOSS));
+                    ctx.setLineWidth(1); ctx.addPath(p); ctx.strokePath();
                 }
-                cachedData = { data: rawData, timestamp: new Date() };
-                caches.ranking.set(resolvedMarket, cachedData);
             }
-            stockData = cachedData.data;
-            timestamp = new Date(cachedData.timestamp);
+
+            if (!data) {
+                // 無數據橫線
+                const p = new Path();
+                p.move(new Point(cx - 2, cy)); p.addLine(new Point(cx + 2, cy));
+                ctx.setStrokeColor(new Color('#666'));
+                ctx.setLineWidth(1); ctx.addPath(p); ctx.strokePath();
+                return;
+            }
+
+            // 三角形
+            const dev = data.deviation;
+            const size = Math.min(Math.max(Math.abs(dev) * TRIANGLE.SCALING_FACTOR + TRIANGLE.MIN_SIZE, TRIANGLE.MIN_SIZE), TRIANGLE.MAX_SIZE);
+            const isUp = dev > 0;
+            const color = new Color(isUp ? COLORS.GAIN : COLORS.LOSS);
+            const hs = size / 2;
+
+            const p = new Path();
+            if (isUp) {
+                p.move(new Point(cx, cy - hs));
+                p.addLine(new Point(cx - hs, cy + hs));
+                p.addLine(new Point(cx + hs, cy + hs));
+            } else {
+                p.move(new Point(cx - hs, cy - hs));
+                p.addLine(new Point(cx + hs, cy - hs));
+                p.addLine(new Point(cx, cy + hs));
+            }
+            ctx.setFillColor(color);
+            ctx.addPath(p);
+            ctx.fillPath();
+        });
+
+        const img = stack.addImage(ctx.getImage());
+        img.imageSize = new Size(width, height);
+        img.centerAlignImage();
+    }
+
+    static drawRSI(stack, rsi) {
+        if (!rsi) {
+            const t = stack.addText('-');
+            t.font = Font.systemFont(CONFIG.FONT_SIZE);
+            t.textColor = new Color('#666');
+            return;
         }
 
-        // 4. 過濾數據
-        const filteredData = filterData(stockData);
-        if (filteredData.length === 0) {
-            throw new Error('過濾後無數據可顯示');
-        }
+        const row = stack.addStack();
+        row.layoutHorizontally();
+        row.centerAlignContent();
 
-        // 5. 補充 K線數據
-        const enrichedData = await enrichData(filteredData, client, caches, displayMarket, mode);
+        // 箭頭
+        const arrow = rsi.trend === 'up' ? '▲' : '▼';
+        const arrowColor = new Color(rsi.trend === 'up' ? CONFIG.RSI_CONFIG.COLORS.WEAK : CONFIG.RSI_CONFIG.COLORS.STRONG); // 注意: 這裡用 WEAK(綠) 代表 UP? 檢查 Config: WEAK=#22c55e(綠), STRONG=#ef4444(紅). 沒錯，綠漲紅跌。
+        const a = row.addText(arrow);
+        a.font = Font.mediumSystemFont(8);
+        a.textColor = arrowColor;
 
-        // 6. 計算表格中所有股票的最高成交額
-        const maxTurnover = enrichedData.length > 0
-            ? Math.max(...enrichedData.map(stock => parseTurnoverToNumber(stock.tradeTurnover)))
-            : 0;
+        // 數值 (漸層色)
+        const val = Math.max(0, Math.min(100, rsi.value));
+        const color = val <= 50
+            ? ColorTheme.interpolate(CONFIG.RSI_CONFIG.COLORS.WEAK, CONFIG.RSI_CONFIG.COLORS.NEUTRAL, val / 50)
+            : ColorTheme.interpolate(CONFIG.RSI_CONFIG.COLORS.NEUTRAL, CONFIG.RSI_CONFIG.COLORS.STRONG, (val - 50) / 50);
 
-        // 7. 建立 Widget
-        const widget = await createWidget(
-            enrichedData,
-            timestamp,
-            maxTurnover,
-            colorCalc,
-            displayMarket,
-            mode
-        );
-
-        // 8. 顯示
-        if (typeof config !== 'undefined' && config.runsInWidget) {
-            Script.setWidget(widget);
-        } else {
-            widget.presentLarge();
-        }
-
-        // 9. 統計信息
-        const endTime = new Date();
-        const totalTime = endTime - startTime;
-        console.log(`=== 執行完成 ===`);
-        console.log(`模式: ${mode}, 市場: ${displayMarket}`);
-        console.log(`股票數: ${enrichedData.length}, 總耗時: ${totalTime}ms`);
-
-    } catch (error) {
-        console.error(`[錯誤] ${error.message}`);
-        const errorWidget = createErrorWidget(error.message);
-        if (typeof config !== 'undefined' && config.runsInWidget) {
-            Script.setWidget(errorWidget);
-        } else {
-            errorWidget.presentLarge();
-        }
-    } finally {
-        Script.complete();
+        const t = row.addText(Math.round(val).toString());
+        t.font = Font.mediumSystemFont(CONFIG.FONT_SIZE);
+        t.textColor = color;
     }
 }
 
-// 執行主程式
-await main();
+class WidgetBuilder {
+    constructor(stocks, market, mode) {
+        this.stocks = stocks;
+        this.market = market;
+        this.mode = mode;
+        this.columns = this.getColumns();
+        this.maxTurnover = Math.max(...stocks.map(s => Utils.parseTurnover(s.turnover)), 0);
+    }
+
+    getColumns() {
+        let cols;
+        if (this.mode === 'watchlist') cols = CONFIG.COLUMNS_MIXED;
+        else cols = this.market === 'HK' ? CONFIG.COLUMNS_HK : CONFIG.COLUMNS_US;
+
+        // 動態調整 MA 寬度
+        return cols.map(c => {
+            if (c.key === 'ma') return { ...c, width: CONFIG.MA_CONFIG.DAYS.length * 12 };
+            return c;
+        }).filter(c => c.visible);
+    }
+
+    build() {
+        const w = new ListWidget();
+        w.backgroundColor = ColorTheme.BACKGROUND;
+        w.setPadding(0, 0, 0, 0);
+
+        this.buildHeader(w);
+        this.stocks.forEach(s => this.buildRow(w, s));
+        return w;
+    }
+
+    buildHeader(w) {
+        const row = w.addStack();
+        row.backgroundColor = ColorTheme.HEADER_BG;
+        const p = CONFIG.UI.HEADER_PADDING;
+        row.setPadding(p.top, p.left, p.bottom, p.right);
+
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+        this.columns.forEach(col => {
+            const stack = row.addStack();
+            stack.size = new Size(col.width, 0);
+            const text = col.key === 'industry' ? timeStr : col.header;
+            const t = stack.addText(text);
+            t.font = Font.boldSystemFont(CONFIG.FONT_SIZE);
+            t.textColor = ColorTheme.TEXT;
+        });
+    }
+
+    buildRow(w, stock) {
+        const container = w.addStack();
+        container.layoutVertically();
+        const p = CONFIG.UI.ROW_PADDING;
+        container.setPadding(p.top, p.left, p.bottom, p.right);
+
+        const row = container.addStack();
+        row.layoutHorizontally();
+        row.centerAlignContent();
+
+        const rowColor = ColorTheme.getChangeColor(stock.changePct);
+
+        this.columns.forEach(col => {
+            const stack = row.addStack();
+            stack.size = new Size(col.width, 0);
+            stack.centerAlignContent();
+
+            switch (col.key) {
+                case 'candle': Painters.drawCandle(stack, stock.candle); break;
+                case 'ma': Painters.drawMA(stack, stock.ma); break;
+                case 'rsi': Painters.drawRSI(stack, stock.rsi); break;
+                default: this.addTextCell(stack, col.key, stock, rowColor);
+            }
+        });
+
+        this.addTurnoverBar(container, stock, rowColor);
+    }
+
+    addTextCell(stack, key, stock, rowColor) {
+        let val = '--';
+        let color = rowColor;
+
+        switch (key) {
+            case 'stockCode':
+                val = Utils.formatStockCode(stock.code, stock.market);
+                break;
+            case 'stockName':
+                val = stock.name;
+                break;
+            case 'stockDisplay':
+                val = stock.market === 'HK' ? stock.name : stock.code;
+                break;
+            case 'changeRatio':
+                val = `${stock.changePct >= 0 ? '+' : ''}${stock.changePct.toFixed(2)}%`;
+                break;
+            case 'currentPrice':
+                val = stock.price.toFixed(2);
+                break;
+            case 'tradeTurnover':
+                val = Utils.formatTurnover(stock.turnover);
+                break;
+            case 'volumeRatio':
+                val = stock.volumeRatio.toFixed(2);
+                color = ColorTheme.getVolumeColor(stock.volumeRatio);
+                break;
+            case 'industry':
+                val = stock.industry;
+                break;
+        }
+
+        const t = stack.addText(String(val));
+        t.font = Font.mediumSystemFont(CONFIG.FONT_SIZE);
+        t.textColor = color;
+        t.lineLimit = 1;
+    }
+
+    addTurnoverBar(container, stock, color) {
+        const totalW = this.columns.reduce((s, c) => s + c.width, 0);
+        const cur = Utils.parseTurnover(stock.turnover);
+        const ratio = this.maxTurnover > 0 ? Math.min(cur / this.maxTurnover, 1) : 0;
+
+        const barBox = container.addStack();
+        barBox.size = new Size(totalW, CONFIG.UI.PROGRESS_BAR_HEIGHT);
+        barBox.backgroundColor = new Color("#888", CONFIG.UI.TURNOVER_BAR.BACKGROUND_OPACITY);
+
+        if (ratio > 0) {
+            const w = Math.max(totalW * ratio, CONFIG.UI.TURNOVER_BAR.MIN_WIDTH);
+            const bar = barBox.addStack();
+            bar.size = new Size(w, CONFIG.UI.PROGRESS_BAR_HEIGHT);
+            bar.backgroundColor = color;
+        }
+        barBox.addSpacer();
+    }
+}
+
+// ==================== 7. 主程式 (Main) ====================
+
+class App {
+    static async run() {
+        const start = Date.now();
+        Logger.log('App Started');
+
+        try {
+            // 1. 決定模式與市場
+            let mode = 'ranking';
+            let market = CONFIG.MARKET;
+
+            if (CONFIG.CUSTOM_WATCHLIST && CONFIG.CUSTOM_WATCHLIST.length > 0) {
+                mode = 'watchlist';
+                market = 'AUTO'; // Watchlist 混合市場
+            } else if (market === 'AUTO') {
+                market = this.resolveAutoMarket();
+            }
+
+            // 2. 獲取數據
+            const service = new StockService();
+            let stocks = await service.getStocks(mode, market);
+
+            // 3. 過濾與排序
+            stocks = stocks.filter(s =>
+                (CONFIG.SHOW_STOCK && s.type === 'ST') ||
+                (CONFIG.SHOW_ETF && s.type === 'ETF')
+            ).slice(0, CONFIG.MAX_ITEMS);
+
+            // 4. 補充數據 (Unified Fetching)
+            // 這裡傳入 Builder 會用到的 columns 來決定要抓什麼
+            const builder = new WidgetBuilder(stocks, market, mode);
+            stocks = await service.enrichStocks(stocks, builder.columns);
+
+            // 5. 建立 Widget
+            const widget = builder.build();
+
+            if (config.runsInWidget) Script.setWidget(widget);
+            else widget.presentLarge();
+
+            Logger.log(`Finished in ${Date.now() - start}ms. Items: ${stocks.length}`);
+
+        } catch (e) {
+            Logger.error(e.message);
+            const w = new ListWidget();
+            w.addText(`Error: ${e.message}`);
+            if (config.runsInWidget) Script.setWidget(w);
+            else w.presentLarge();
+        } finally {
+            Script.complete();
+        }
+    }
+
+    static resolveAutoMarket() {
+        const now = new Date();
+
+        const ny = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const nyDay = ny.getDay();
+        const nyHour = ny.getHours();
+        const nyMin = ny.getMinutes();
+        const nyTime = nyHour * 60 + nyMin;
+
+        const hk = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Hong_Kong' }));
+        const hkDay = hk.getDay();
+        const hkHour = hk.getHours();
+        const hkMin = hk.getMinutes();
+        const hkTime = hkHour * 60 + hkMin;
+
+        const hkOpen = hkDay >= 1 && hkDay <= 5 && hkTime >= 9 * 60 + 30 && hkTime <= 16 * 60;
+        const usOpen = nyDay >= 1 && nyDay <= 5 && nyTime >= 9 * 60 + 30 && nyTime <= 16 * 60;
+
+        if (usOpen) return 'US';
+        if (hkOpen) return 'HK';
+
+        if (hkDay === 0 || hkDay === 6) return 'US';
+
+        // 維持收市後~另一股開市前 1 小時為同一市場
+        if (hkDay >= 1 && hkDay <= 5) {
+            if (hkTime > 16 * 60 && nyTime < 8 * 60 + 30) return 'HK';  // 港股收市後
+            if (nyTime > 4 * 60 && hkTime < 8 * 60 + 30) return 'US';   // 美股開市前
+        }
+
+        return 'US';
+    }
+}
+
+await App.run();

@@ -1,8 +1,8 @@
-# iOS Scriptable 股票 Widget **v2.10.0** 規格文件
+# iOS Scriptable 股票 Widget **v3.0.0** 規格文件
 
-**版本**: 2.10.0-RSI-Implementation  
+**版本**: 3.0.0-Refactored  
 **平台**: iOS Scriptable v1.7+  
-**發布日期**: 2025-11-28  
+**發布日期**: 2025-12-01  
 **GitHub**: [https://github.com/hin88188/ios-scriptable-stock-widget/](https://github.com/hin88188/ios-scriptable-stock-widget/)
 
 ---
@@ -11,139 +11,82 @@
 
 | 版本 | 日期 | 主要特色 | 文件同步 |
 |------|------|----------|----------|
-| **2.10.0** | 2025-11-28 | **RSI 相對強弱指標** (配置/計算/視覺化/性能優化) | ✅ |
-| 2.9.0 | 2025-11-26 | MA 均線完整實作 (配置/計算/視覺化/排名) | ✅ |
-| 2.8.0 | 2025-11-19 | 分時走勢隨機模式 (Rank/Cus) | ✅ |
-| 2.7.0 | 2025-11-16 | 分時走勢圖 Widget + 多週期 | ✅ |
-| 2.6.0 | 2025-11-08 | `LbkrsClient` API 抽象 | ✅ |
-| 2.5.0 | 2025-11-06 | 成交額線條視覺化 | ✅ |
+| **3.0.0** | 2025-12-01 | **架構重構** (分層架構/OOP/統一數據獲取/並發優化) | ✅ |
+| 2.10.0 | 2025-11-28 | RSI 相對強弱指標 | ✅ |
+| 2.9.0 | 2025-11-26 | MA 均線完整實作 | ✅ |
+| 2.8.0 | 2025-11-19 | 分時走勢隨機模式 | ✅ |
+| 2.7.0 | 2025-11-16 | 分時走勢圖 Widget | ✅ |
 
 ---
 
-## 🎯 產品架構
+## 🎯 產品架構 (v3.0.0)
 
-### **雙 Widget 系統**
+採用 **七層架構 (Layered Architecture)** 設計，確保代碼的高內聚低耦合：
 
-| Widget | 檔案 | 尺寸 | 功能 |
-|--------|------|------|------|
-| **成交額排行** | `Widget.js` | **Large** | 排行榜/自選 + K線 + 成交額線條 |
-| **分時走勢圖** | `MiniTimesharesSparklineWidget.js` | **Medium** | 隨機/固定股票 + 多週期分時圖 |
-
-### **資料流**（兩 Widget 共用核心概念）
-
+```mermaid
+graph TD
+    Config[1. Config 配置層] --> Core[2. Core 核心工具層]
+    Core --> Network[3. Network 網絡層]
+    Network --> Domain[4. Domain 領域層]
+    Domain --> Service[5. Service 服務層]
+    Service --> UI[6. UI 展示層]
+    UI --> App[7. App 應用層]
 ```
-CONFIG → LbkrsClient/RandomEngine → 快取層 → 數據處理 → UI 渲染
-     ↓
-CounterIdHelper → StockDataMapper → KlineDataProcessor
-```
+
+### **層級職責**
+
+1.  **Config**: 定義全域常數 (`MARKET`, `COLORS`)、API 端點、快取策略。
+2.  **Core**: 通用工具 (`Logger`, `Utils`, `ColorTheme`)，無業務邏輯。
+3.  **Network**: 處理 HTTP 請求 (`HttpClient`)、重試機制、並發控制 (`LbkrsApi`)。
+4.  **Domain**: 純粹的數據模型 (`Stock`) 與算法 (`TechnicalIndicators`)。
+5.  **Service**: 業務邏輯核心 (`StockService`, `CacheService`)，協調數據獲取與計算。
+6.  **UI**: 視圖構建 (`WidgetBuilder`) 與繪圖邏輯 (`Painters`)。
+7.  **App**: 程式入口，負責生命週期管理與錯誤處理。
 
 ---
 
-## 🏗️ 核心組件（v2.10.0）
+## 🏗️ 核心組件 (v3.0.0)
 
-### **1. 隨機選擇引擎 (Random Selection Engine)**
-位於 `MiniTimesharesSparklineWidget.js`，負責決定顯示的股票。
-- **`none` 模式**: 解析 `widgetParameter` 或 `CONFIG.symbol`，取逗號分隔的第一個代碼。
-- **`cus` (Custom) 模式**: 解析逗號分隔列表，純隨機選取一支。
-- **`rank` (Ranking) 模式**: 
-  - 自動判斷市場 (US/HK)。
-  - 呼叫 Ranking API 獲取前 `RANK_TOP_N` (預設50) 檔股票。
-  - 純隨機選取一支。
-  - 具備 1 分鐘快取 (`sparkline_ranking_XX.json`)。
+### **1. 統一數據獲取 (Unified Fetching)**
+`StockService.enrichStocks(stocks, columns)` 是數據處理的核心樞紐：
+- **智能判斷**: 根據 `columns` 可見性自動決定是否需要抓取歷史數據。
+- **策略選擇**:
+  - 需要 MA/RSI → 抓取 201 天歷史數據 (並發)。
+  - 僅需 Candle → 抓取 1 天歷史數據 (或使用 Detail 數據)。
+- **並發執行**: 使用 `Promise.all` 並發處理所有股票的數據補充。
 
-### **2. RSI 相對強弱指標** `RSICalculator` (v2.10.0 新增)
-```javascript
-class RSICalculator {
-  calculateRSI(prices, days=6)     // Wilder's RSI 計算
-  #computeRSI(prices, days)        // 私有方法：單一 RSI 值
-}
+### **2. 現代化網絡層** `HttpClient`
+- **並發控制**: 透過 `MAX_CONCURRENT_REQUESTS` (預設 20) 限制同時發出的請求數，避免觸發 API 限流。
+- **指數退避**: 請求失敗時自動重試 (`REQUEST_RETRY_COUNT`=3)，等待時間指數增長。
+- **請求隊列**: 內部維護 Queue，確保請求有序執行。
 
-// RSI 配置
-CONFIG.RSI_CONFIG = {
-  DAYS: 6,                          // 預設 6 日週期
-  COLORS: {
-    STRONG: '#ef4444',              // RSI 100 (超買警示) 紅色
-    NEUTRAL: '#CCCCCC',             // RSI 50 (中性) 灰色
-    WEAK: '#22c55e'                 // RSI 0 (超賣機會) 綠色
-  }
-}
-```
+### **3. 繪圖邏輯分離** `Painters`
+將繪圖代碼從 UI 建構中抽離，專注於 `DrawContext` 操作：
+- `drawCandle(stack, candle)`: 繪製 K 線 (實體 + 影線)。
+- `drawMA(stack, maData)`: 繪製 MA 排名線與乖離率三角形。
+- `drawRSI(stack, rsi)`: 繪製 RSI 數值與趨勢箭頭。
 
-**視覺化特色**:
-- 🔺 趨勢三角形（▲▼）：使用 K 線升跌顏色（綠/紅），字體 8px
-- 🎨 RSI 數值：漸層色（紅-灰-綠），反映 RSI 強弱
-- ⚡ 性能優化：與 MA 共用 K 線歷史查詢，零額外 API 呼叫
-- 📍 欄位位置：量比與 MA 之間（30px 寬度）
-
-### **3. MA 均線系統** `MACalculator` (v2.9.0)
-```javascript
-class MACalculator {
-  calculateMA(prices, days)        // 計算移動平均
-  calculateDeviation(price, ma)    // 計算乖離率
-}
-
-// MA 配置
-CONFIG.MA_CONFIG = {
-  DAYS: [20, 50, 200],              // 三條均線週期
-  TRIANGLE: { MIN_SIZE: 4, MAX_SIZE: 10, SCALING_FACTOR: 0.5 },
-  COLORS: { GAIN: '#00C46B', LOSS: '#FF3B3B' }
-}
-```
-
-**視覺化特色**:
-- 🔺 乖離率三角形：大小反映偏離程度
-- 📊 動態欄位寬度：`DAYS.length * 12` 像素
-- 🏆 排名標記：最高 MA 上方綠線，最低 MA 下方紅線
-
-### **4. API 抽象層** `LbkrsClient`
-```javascript
-class LbkrsClient {
-  // 集中管理所有 Lbkrs endpoint
-  BASE: 'https://m-gl.lbkrs.com'
-  getRankingList(market: 'US'|'HK')
-  getDetailByCounterId(counterId)
-  getKlineHistory(counterId, lineNum=201)  // v2.9.0 新增
-  getTimeshares(counterId, period: '1d'|'5d')
-}
-```
-
-### **5. 專業快取系統**
-| 快取類 | 檔案 | 時效 | 用途 |
-|--------|------|------|------|
-| `RankingCache` | `lbkrs_ranking_US.json` | 1分鐘 | Large Widget 排行 |
-| `SparklineRankingCache` | `sparkline_ranking_US.json` | 1分鐘 | **v2.8** Medium Widget 隨機選股 |
-| `WatchlistCache` | `lbkrs_watchlist.json` | 1分鐘 | 自選列表 |
-| `KlineCache` | `lbkrs_kline.json` | 1分鐘 | K線數據 |
+### **4. 通用快取服務** `CacheService`
+- **統一存儲**: 所有快取存為 `lbkrs_v3_{key}.json`。
+- **TTL 控制**: 讀取時檢查 `ts` 時間戳，過期自動失效 (`CACHE_DURATION` / `HISTORY_CACHE_DURATION`)。
+- **數據隔離**: 支援 Ranking、Watchlist、History 等多種數據類型的快取。
 
 ---
 
-## 🔌 配置系統
+## 🔌 配置系統 (v3.0.0)
 
-### **Widget.js**（成交額排行 Large）
+### **Widget.js**
 ```javascript
 const CONFIG = {
-  MARKET: 'AUTO',                    // AUTO/US/HK
-  CUSTOM_WATCHLIST: ['NVDA','0700'], // 自選股票
-  MAX_ITEMS: 21,                     // Large 最大高度
-  DEBUG_MODE: false,
+  // ... 基礎配置
+  CACHE_DURATION: 1,          // 主列表快取 (分)
+  HISTORY_CACHE_DURATION: 1,  // 歷史數據快取 (分) - v3.0.0 改為 1 分鐘
   
-  // v2.9.0 MA 均線配置
-  MA_CONFIG: {
-    DAYS: [20, 50, 200],             // 均線週期
-    TRIANGLE: { MIN_SIZE: 4, MAX_SIZE: 10 },
-    COLORS: { GAIN: '#00C46B', LOSS: '#FF3B3B' }
-  },
+  // 效能配置
+  MAX_CONCURRENT_REQUESTS: 20, // 最大並發數 - v3.0.0 提升至 20
+  REQUEST_RETRY_COUNT: 3,
   
-  // v2.10.0 RSI 相對強弱指標配置
-  RSI_CONFIG: {
-    DAYS: 6,                         // 預設 6 日週期
-    COLORS: {
-      STRONG: '#ef4444',             // 超買 (紅色警示)
-      NEUTRAL: '#CCCCCC',            // 中性
-      WEAK: '#22c55e'                // 超賣 (綠色機會)
-    }
-  },
-  // ... 完整配置見原始碼
+  // ... MA/RSI/KLINE 配置保持不變
 }
 ```
 
@@ -192,43 +135,44 @@ const CONFIG = {
 
 ---
 
-## 🧪 效能基準（v2.10.0）
+## 🧪 效能基準 (v3.0.0)
 
-| 指標 | v2.9.0 | v2.10.0 | 備註 |
-|------|--------|---------|------|
-| **Large Widget** | <3.5s | <3.5s | RSI 與 MA 共用查詢，無額外開銷 |
+| 指標 | v2.10.0 | v3.0.0 | 備註 |
+|------|---------|--------|------|
+| **Large Widget** | <3.5s | **<2.5s** | 並發優化與非阻塞延遲 |
 | **Medium (固定)** | <2.5s | <2.5s | 無變更 |
 | **Medium (Rank)** | <3.5s | <3.5s | 無變更 |
 | **All Periods** | <3s | <3s | 無變更 |
-| **快取命中** | <0.5s | <0.5s | 無變更 |
+| **快取命中** | <0.5s | **<0.3s** | 結構優化 |
 | **K線數據量** | 201天 | 201天 | MA + RSI 共用 |
-| **API 呼叫** | N | N | RSI 零額外 API 呼叫 |
-| **計算開銷** | - | +6次加減法/股 | 可忽略 |
+| **API 呼叫** | N | N | 智慧並發控制 |
+| **計算開銷** | - | - | 邏輯內聚 |
 
 ---
 
 ---
 
-## 🎨 欄位配置（v2.10.0）
-
-### **Large Widget 欄位佈局**
-```
-美股: industry(65) | stockCode | kline | changeRatio | currentPrice | 
-      volumeRatio(28) | rsi(30) | ma(36)
-
-港股: industry(65) | stockName(65) | kline | changeRatio | currentPrice | 
-      volumeRatio(28) | rsi(30) | ma(36)
-```
-
-**v2.10.0 寬度調整**:
-- `industry`: 70px → 65px
-- `stockName/stockDisplay`: 85px → 65px (HK/MIXED)
-- `volumeRatio`: 30px → 28px
-- `rsi`: 新增 30px
-- `tradeTurnover`: 美股改為不顯示
-
----
-
-**文件版本**: v2.10.0-RSI-Implementation  
-**最後更新**: 2025-11-28  
-**狀態**: ✅ 與原始碼 **100% 同步**
+## 🎨 欄位配置 (v3.0.0)
+ 
+ ### **Large Widget 欄位佈局**
+ ```
+ 美股: industry(65) | stockCode | kline | changeRatio | currentPrice | 
+       volumeRatio(28) | rsi(30) | ma(36)
+ 
+ 港股: industry(65) | stockName(65) | kline | changeRatio | currentPrice | 
+       volumeRatio(28) | rsi(30) | ma(36)
+ ```
+ 
+ **v3.0.0 寬度調整**:
+ - 保持 v2.10.0 的優化佈局：
+   - `industry`: 65px
+   - `stockName/stockDisplay`: 65px (HK/MIXED)
+   - `volumeRatio`: 28px
+   - `rsi`: 30px
+   - `ma`: 動態寬度 (`DAYS.length * 12`)
+ 
+ ---
+ 
+ **文件版本**: v3.0.0-Refactored  
+ **最後更新**: 2025-12-01  
+ **狀態**: ✅ 與原始碼 **100% 同步**

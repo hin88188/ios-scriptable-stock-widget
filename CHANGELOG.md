@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [3.0.0] - 2025-12-01 **架構重構與代碼現代化**
+
+### Added (新增功能)
+- **分層架構 (Layered Architecture)**：將代碼重組為 Config, Core, Network, Domain, Service, UI, App 七層。
+- **物件導向設計 (OOP)**：全面採用 Class 結構（`StockService`, `HttpClient`, `WidgetBuilder` 等）。
+- **通用快取服務**：`CacheService` 提供統一的 JSON 檔案快取機制，支援 TTL 過期控制。
+- **現代化網絡層**：`HttpClient` 支援並發控制 (`MAX_CONCURRENT_REQUESTS`)、指數退避重試 (`REQUEST_RETRY_COUNT`) 和請求隊列。
+- **更強大的配置**：新增調試模式 (`DEBUG_MODE`) 和 Cookie 支援。
+
+### Changed (變更)
+- **統一數據獲取**：`enrichStocks` 方法統一處理 MA、RSI 和 K 線的數據需求，自動判斷最佳抓取策略。
+- **繪圖邏輯分離**：`Painters` 類別專責處理 K 線、MA 三角形和 RSI 的繪製。
+- **預設配置變更**：
+  - `HISTORY_CACHE_DURATION` 預設值由 60 分鐘改為 **1 分鐘** (即時性優先)。
+  - `MAX_CONCURRENT_REQUESTS` 預設值由 10 提升至 **20** (提升載入速度)。
+
+### Optimized (優化)
+- **非阻塞延遲**：全域使用 `Utils.sleep` (Promise-based)，消除主執行緒阻塞。
+- **智慧並發**：自選股票和歷史數據請求自動並發執行，並受最大並發數限制。
+- **按需加載**：僅在欄位可見時才請求對應的歷史數據 (MA/RSI)。
+
+### Breaking Changes (破壞性變更)
+- 代碼結構完全改變，若有自訂修改需重新適配。
+- 配置項結構微調（但主要配置項名稱保持相容）。
+
 ## [2.10.0] - 2025-11-28 **RSI 相對強弱指標**
 
 ### Added
