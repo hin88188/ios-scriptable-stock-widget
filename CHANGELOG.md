@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [3.1.0] - 2025-12-01 **RSI 計算修正**
+
+### Fixed (修正)
+- **RSI 數據範圍錯誤**：修正 RSI 計算時錯誤引用最舊數據的問題，現在正確使用最新收盤價計算。
+- **RSI 算法升級**：改用標準 **Wilder's Smoothing** (平滑移動平均) 算法，提升與主流看盤軟體（如 TradingView）的數值一致性。
+
+### Added (新增)
+- **調試日誌**：新增 RSI 計算的詳細 Debug Log (`Now/Prev` 數值)，方便驗證。
+
+
 ## [3.0.0] - 2025-12-01 **架構重構與代碼現代化**
 
 ### Added (新增功能)

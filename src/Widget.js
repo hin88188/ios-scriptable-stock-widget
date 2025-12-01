@@ -1,6 +1,6 @@
 // Widget.js
 // 盤中成交額排行 Widget - 支持美股/港股
-// 版本: v3.0.0
+// 版本: v3.1.0
 
 // ==================== 1. 配置與常數 (Config) ====================
 const CONFIG = {
@@ -382,14 +382,33 @@ class TechnicalIndicators {
 
     static calculateRSI(prices, days = 6) {
         if (prices.length < days + 1) return null;
-        let gains = 0, losses = 0;
+
+        let gains = 0;
+        let losses = 0;
+
+        // 1. Initial SMA (First 'days' periods)
         for (let i = 1; i <= days; i++) {
-            const diff = prices[i] - prices[i - 1];
-            if (diff > 0) gains += diff;
-            else losses += Math.abs(diff);
+            const change = prices[i] - prices[i - 1];
+            if (change > 0) gains += change;
+            else losses += Math.abs(change);
         }
-        const rs = gains / losses;
-        return losses === 0 ? 100 : 100 - (100 / (1 + rs));
+
+        let avgGain = gains / days;
+        let avgLoss = losses / days;
+
+        // 2. Smoothing (Rest of the data)
+        for (let i = days + 1; i < prices.length; i++) {
+            const change = prices[i] - prices[i - 1];
+            const currentGain = change > 0 ? change : 0;
+            const currentLoss = change < 0 ? Math.abs(change) : 0;
+
+            avgGain = ((avgGain * (days - 1)) + currentGain) / days;
+            avgLoss = ((avgLoss * (days - 1)) + currentLoss) / days;
+        }
+
+        if (avgLoss === 0) return 100;
+        const rs = avgGain / avgLoss;
+        return 100 - (100 / (1 + rs));
     }
 }
 
@@ -573,6 +592,11 @@ class StockService {
                         if (needsRSI) {
                             const rsiNow = TechnicalIndicators.calculateRSI(prices, CONFIG.RSI_CONFIG.DAYS);
                             const rsiPrev = TechnicalIndicators.calculateRSI(prices.slice(0, -1), CONFIG.RSI_CONFIG.DAYS);
+
+                            if (CONFIG.DEBUG_MODE) {
+                                Logger.debug(`[RSI] ${stock.code}: Now=${rsiNow?.toFixed(2)}, Prev=${rsiPrev?.toFixed(2)} (Len:${prices.length})`);
+                            }
+
                             if (rsiNow !== null) {
                                 stock.rsi = { value: rsiNow, trend: rsiNow >= rsiPrev ? 'up' : 'down' };
                             }

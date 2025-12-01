@@ -19,7 +19,7 @@
 | 特色 | 描述 |
 |------|------|
 | 🎯 **雙 Widget 系統** | **成交額排行**(`Widget.js`) + **分時走勢圖**(`MiniTimesharesSparklineWidget.js`) |
-| 🏗️ **現代化架構** | **v3.0.0** 採用分層架構 (Layered Architecture) 與物件導向設計，高內聚低耦合 |
+| 🏗️ **現代化架構** | **v3.1.0** 採用分層架構 (Layered Architecture) 與物件導向設計，高內聚低耦合 |
 | ⚡ **極速效能** | 智慧並發請求 (Max 20) + 非阻塞延遲 + 統一數據獲取，載入速度提升顯著 |
 | 🎲 **隨機展示** | 支援從自選列表或市場排行前 50 名中隨機顯示一支股票 |
 | 🔄 **智能雙模式** | 自選股票優先，無自選自動切換排行榜 |
@@ -41,6 +41,10 @@
 科技       TSLA          📊  -2.15%  242.30  2.34  ▼28  ▼▼▼
 ```
 
+| 美股 | 港股 |
+|-----|-----|
+| ![美股](https://github.com/hin88188/ios-scriptable-stock-widget/blob/main/screenshot/us-stocks.png) | ![港股](https://github.com/hin88188/ios-scriptable-stock-widget/blob/main/screenshot/hk-stocks.png) |
+
 ### **Medium Widget** - 分時走勢圖（支援隨機/多週期）
 
 ```
@@ -48,6 +52,10 @@
 [6m]  [1m]  [5d]  [1d]
 +2.1%  -0.8%  +1.2%  +3.58%
 ```
+
+| 全週期 | 1日 |
+|-------|-------|
+| ![全週期](https://github.com/hin88188/ios-scriptable-stock-widget/blob/main/screenshot/4-cycle-trend-chart.png) | ![1日](https://github.com/hin88188/ios-scriptable-stock-widget/blob/main/screenshot/1d-trend-chart.png) |
 
 ## 🚀 快速安裝
 
