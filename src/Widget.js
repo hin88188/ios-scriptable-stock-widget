@@ -1,6 +1,6 @@
 // Widget.js
 // 盤中成交額排行 Widget - 支持美股/港股
-// 版本: v3.1.0
+// 版本: v3.2.0 (MA 均線三段膠囊燈號重構)
 
 // ==================== 1. 配置與常數 (Config) ====================
 const CONFIG = {
@@ -44,15 +44,23 @@ const CONFIG = {
     // MA (均線) 配置
     MA_CONFIG: {
         DAYS: [20, 50, 200],
-        TRIANGLE: {
-            MIN_SIZE: 4,
-            MAX_SIZE: 10,
-            SCALING_FACTOR: 0.5
+        PILL: {
+            WIDTH: 8,
+            HEIGHT: 8,
+            RADIUS: 2,
+            GAP: 3
+        },
+        POD: {
+            PADDING_X: 2,
+            PADDING_Y: 1,
+            RADIUS: 3,
+            BORDER_WIDTH: 1,
+            BG_OPACITY: 0.15
         },
         COLORS: {
             GAIN: '#00C46B',
             LOSS: '#FF3B3B',
-            NEUTRAL: '#CCCCCC'
+            NEUTRAL: '#555555'
         }
     },
 
@@ -582,7 +590,8 @@ class StockService {
                                 if (val) {
                                     stock.ma[`ma${day}`] = {
                                         value: val,
-                                        deviation: ((stock.price - val) / val) * 100
+                                        deviation: ((stock.price - val) / val) * 100,
+                                        isAbove: stock.price >= val
                                     };
                                 }
                             });
@@ -693,12 +702,12 @@ class Painters {
     }
 
     static drawMA(stack, maData) {
-        const { DAYS, TRIANGLE, COLORS } = CONFIG.MA_CONFIG;
-        const width = DAYS.length * 12;
+        const { DAYS, PILL, POD, COLORS } = CONFIG.MA_CONFIG;
+        const totalPillWidth = DAYS.length * PILL.WIDTH + (DAYS.length - 1) * PILL.GAP;
+        const width = totalPillWidth + POD.PADDING_X * 2;
         const height = 14;
-        const itemWidth = 12;
 
-        if (Object.keys(maData).length === 0) {
+        if (!maData || Object.keys(maData).length === 0) {
             const t = stack.addText('-');
             t.font = Font.systemFont(10);
             t.textColor = new Color('#666');
@@ -710,65 +719,73 @@ class Painters {
         ctx.opaque = false;
         ctx.respectScreenScale = true;
 
-        // 排名
-        const valid = DAYS.map(d => ({ d, val: maData[`ma${d}`]?.value }))
-            .filter(x => x.val)
-            .sort((a, b) => b.val - a.val); // 降序
+        // 判斷多空排列 (Alignment)
+        const ma20 = maData.ma20;
+        const ma50 = maData.ma50;
+        const ma200 = maData.ma200;
+        const hasAllThree = ma20?.value != null && ma50?.value != null && ma200?.value != null;
 
-        const rankMap = new Map();
-        valid.forEach((x, i) => rankMap.set(x.d, i));
+        const isBullish = hasAllThree &&
+            ma20.value > ma50.value && ma50.value > ma200.value &&
+            (ma20.isAbove ?? ma20.deviation >= 0) &&
+            (ma50.isAbove ?? ma50.deviation >= 0) &&
+            (ma200.isAbove ?? ma200.deviation >= 0);
 
+        const isBearish = hasAllThree &&
+            ma20.value < ma50.value && ma50.value < ma200.value &&
+            !(ma20.isAbove ?? ma20.deviation >= 0) &&
+            !(ma50.isAbove ?? ma50.deviation >= 0) &&
+            !(ma200.isAbove ?? ma200.deviation >= 0);
+
+        // 若為多頭或空頭排列，繪製外框膠囊 (Pod Frame)
+        if (isBullish || isBearish) {
+            const podColor = isBullish ? COLORS.GAIN : COLORS.LOSS;
+            const podHeight = PILL.HEIGHT + POD.PADDING_Y * 2;
+            const podY = (height - podHeight) / 2;
+            const podRect = new Rect(0, podY, width, podHeight);
+            const podPath = new Path();
+            podPath.addRoundedRect(podRect, POD.RADIUS, POD.RADIUS);
+
+            // 半透明底色
+            ctx.setFillColor(new Color(podColor, POD.BG_OPACITY));
+            ctx.addPath(podPath);
+            ctx.fillPath();
+
+            // 1px 外框
+            ctx.setStrokeColor(new Color(podColor, 0.9));
+            ctx.setLineWidth(POD.BORDER_WIDTH);
+            ctx.addPath(podPath);
+            ctx.strokePath();
+        }
+
+        // 繪製三段微型膠囊燈號
         DAYS.forEach((day, i) => {
             const data = maData[`ma${day}`];
-            const cx = i * itemWidth + itemWidth / 2;
-            const cy = height / 2;
+            const px = POD.PADDING_X + i * (PILL.WIDTH + PILL.GAP);
+            const py = (height - PILL.HEIGHT) / 2;
 
-            // 排名線
-            if (rankMap.has(day)) {
-                const rank = rankMap.get(day);
-                const lx = i * itemWidth;
-                if (rank === 0) { // 最高: 綠頂線
-                    const p = new Path();
-                    p.move(new Point(lx, 1)); p.addLine(new Point(lx + itemWidth, 1));
-                    ctx.setStrokeColor(new Color(COLORS.GAIN));
-                    ctx.setLineWidth(1); ctx.addPath(p); ctx.strokePath();
-                } else if (rank === valid.length - 1 && valid.length > 1) { // 最低: 紅底線
-                    const p = new Path();
-                    p.move(new Point(lx, height - 1)); p.addLine(new Point(lx + itemWidth, height - 1));
-                    ctx.setStrokeColor(new Color(COLORS.LOSS));
-                    ctx.setLineWidth(1); ctx.addPath(p); ctx.strokePath();
-                }
-            }
+            if (data && data.value != null) {
+                const isAbove = data.isAbove ?? (data.deviation >= 0);
+                const pillColor = new Color(isAbove ? COLORS.GAIN : COLORS.LOSS);
+                const pillRect = new Rect(px, py, PILL.WIDTH, PILL.HEIGHT);
+                const pillPath = new Path();
+                pillPath.addRoundedRect(pillRect, PILL.RADIUS, PILL.RADIUS);
 
-            if (!data) {
-                // 無數據橫線
-                const p = new Path();
-                p.move(new Point(cx - 2, cy)); p.addLine(new Point(cx + 2, cy));
-                ctx.setStrokeColor(new Color('#666'));
-                ctx.setLineWidth(1); ctx.addPath(p); ctx.strokePath();
-                return;
-            }
-
-            // 三角形
-            const dev = data.deviation;
-            const size = Math.min(Math.max(Math.abs(dev) * TRIANGLE.SCALING_FACTOR + TRIANGLE.MIN_SIZE, TRIANGLE.MIN_SIZE), TRIANGLE.MAX_SIZE);
-            const isUp = dev > 0;
-            const color = new Color(isUp ? COLORS.GAIN : COLORS.LOSS);
-            const hs = size / 2;
-
-            const p = new Path();
-            if (isUp) {
-                p.move(new Point(cx, cy - hs));
-                p.addLine(new Point(cx - hs, cy + hs));
-                p.addLine(new Point(cx + hs, cy + hs));
+                ctx.setFillColor(pillColor);
+                ctx.addPath(pillPath);
+                ctx.fillPath();
             } else {
-                p.move(new Point(cx - hs, cy - hs));
-                p.addLine(new Point(cx + hs, cy - hs));
-                p.addLine(new Point(cx, cy + hs));
+                // 缺省數據: 暗灰色橫線
+                const dashPath = new Path();
+                const midY = py + PILL.HEIGHT / 2;
+                dashPath.move(new Point(px + 1, midY));
+                dashPath.addLine(new Point(px + PILL.WIDTH - 1, midY));
+
+                ctx.setStrokeColor(new Color(COLORS.NEUTRAL));
+                ctx.setLineWidth(1.5);
+                ctx.addPath(dashPath);
+                ctx.strokePath();
             }
-            ctx.setFillColor(color);
-            ctx.addPath(p);
-            ctx.fillPath();
         });
 
         const img = stack.addImage(ctx.getImage());

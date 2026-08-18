@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+## [3.2.0] - 2026-08-19 **MA 均線三段膠囊燈號重構**
+
+### Changed (變更)
+- **MA 視覺呈現升級 (Three-Segment Pill Indicator)**：將原先「三角形大小 + 上下底線」改為「三段微型圓角膠囊燈號 (20/50/200日)」。
+  - 每個單元固定 8×8px，站上顯示亮綠、跌破顯示亮紅，解決視覺大小不一與認知負擔問題。
+  - 當形成強勢多頭或極端空頭排列時，自動觸發 1px 微光外框與半透明底色膠囊 (Pod Frame)。
+  - 歷史數據不足之新股固定顯示暗灰橫線，確保跨行排版嚴格對齊。
+
+### Added (新增)
+- **領域模型與字典 (Domain Model)**：新增 `CONTEXT.md`，定義 MA 均線系統、Price-MA Position、MA Alignment 與 Pod Frame 規範。
+
 ## [3.1.0] - 2025-12-01 **RSI 計算修正**
 
 ### Fixed (修正)

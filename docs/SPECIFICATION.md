@@ -1,8 +1,8 @@
-# iOS Scriptable 股票 Widget **v3.1.0** 規格文件
+# iOS Scriptable 股票 Widget **v3.2.0** 規格文件
 
-**版本**: 3.1.0-RSI-Fix  
+**版本**: 3.2.0-MA-Pill  
 **平台**: iOS Scriptable v1.7+  
-**發布日期**: 2025-12-01  
+**發布日期**: 2026-08-19  
 **GitHub**: [https://github.com/hin88188/ios-scriptable-stock-widget/](https://github.com/hin88188/ios-scriptable-stock-widget/)
 
 ---
@@ -11,7 +11,8 @@
 
 | 版本 | 日期 | 主要特色 | 文件同步 |
 |------|------|----------|----------|
-| **3.1.0** | 2025-12-01 | **RSI 修正** (Wilder's Smoothing 算法/數據範圍修正) | ✅ |
+| **3.2.0** | 2026-08-19 | **MA 均線三段膠囊燈號重構** (20/50/200日站位 + 多空排列膠囊框) | ✅ |
+| 3.1.0 | 2025-12-01 | **RSI 修正** (Wilder's Smoothing 算法/數據範圍修正) | ✅ |
 | 3.0.0 | 2025-12-01 | **架構重構** (分層架構/OOP/統一數據獲取/並發優化) | ✅ |
 | 2.10.0 | 2025-11-28 | RSI 相對強弱指標 | ✅ |
 | 2.9.0 | 2025-11-26 | MA 均線完整實作 | ✅ |
@@ -64,7 +65,7 @@ graph TD
 ### **3. 繪圖邏輯分離** `Painters`
 將繪圖代碼從 UI 建構中抽離，專注於 `DrawContext` 操作：
 - `drawCandle(stack, candle)`: 繪製 K 線 (實體 + 影線)。
-- `drawMA(stack, maData)`: 繪製 MA 排名線與乖離率三角形。
+- `drawMA(stack, maData)`: 繪製 MA 三段膠囊燈號 (20/50/200 站位色塊與多空排列微光外框)。
 - `drawRSI(stack, rsi)`: 繪製 RSI 數值與趨勢箭頭。
 
 ### **4. 通用快取服務** `CacheService`
@@ -174,6 +175,6 @@ const CONFIG = {
  
  ---
  
- **文件版本**: v3.1.0-RSI-Fix  
- **最後更新**: 2025-12-01  
+ **文件版本**: v3.2.0-MA-Pill  
+ **最後更新**: 2026-08-19  
  **狀態**: ✅ 與原始碼 **100% 同步**
